@@ -13,14 +13,26 @@
 #include <io.h>
 #define MI_MKDIR(p) _mkdir(p)
 #define MI_UNLINK(p) _unlink(p)
+#define DEV_NULL "NUL"
+#define CWEBP_BIN "deps/libwebp/build/cwebp.exe"
+#define GIF2WEBP_BIN "deps/libwebp/build/gif2webp.exe"
+#define AVIFENC_BIN "deps/libavif/build/avifenc.exe"
 #else
 #include <unistd.h>
 #define MI_MKDIR(p) mkdir(p, 0755)
 #define MI_UNLINK(p) unlink(p)
+#define DEV_NULL "/dev/null"
+#define CWEBP_BIN "deps/libwebp/build/cwebp"
+#define GIF2WEBP_BIN "deps/libwebp/build/gif2webp"
+#define AVIFENC_BIN "deps/libavif/build/avifenc"
 #endif
 
 #define FIXTURES "tests/fixtures"
+#ifdef _WIN32
+#define TMP "modernimage_test_tmp"
+#else
 #define TMP "/tmp/modernimage_test"
+#endif
 
 static int g_pass = 0, g_fail = 0;
 
@@ -72,7 +84,7 @@ static void test_cwebp(const char* name, const char* input,
     snprintf(out_cli, sizeof(out_cli), TMP "/cwebp_%s_cli.webp", name);
     snprintf(out_br, sizeof(out_br), TMP "/cwebp_%s_br.webp", name);
 
-    snprintf(cmd, sizeof(cmd), "deps/libwebp/build/cwebp %s %s -o %s 2>/dev/null",
+    snprintf(cmd, sizeof(cmd), CWEBP_BIN " %s %s -o %s 2>" DEV_NULL,
              cli_extra, input, out_cli);
     cli(cmd);
 
@@ -107,7 +119,7 @@ static void test_gif2webp(const char* name, const char* input,
     snprintf(out_cli, sizeof(out_cli), TMP "/gif_%s_cli.webp", name);
     snprintf(out_br, sizeof(out_br), TMP "/gif_%s_br.webp", name);
 
-    snprintf(cmd, sizeof(cmd), "deps/libwebp/build/gif2webp %s %s -o %s 2>/dev/null",
+    snprintf(cmd, sizeof(cmd), GIF2WEBP_BIN " %s %s -o %s 2>" DEV_NULL,
              cli_extra, input, out_cli);
     cli(cmd);
 
@@ -141,7 +153,7 @@ static void test_avifenc(const char* name, const char* input,
     snprintf(out_cli, sizeof(out_cli), TMP "/avif_%s_cli.avif", name);
     snprintf(out_br, sizeof(out_br), TMP "/avif_%s_br.avif", name);
 
-    snprintf(cmd, sizeof(cmd), "deps/libavif/build/avifenc %s %s %s 2>/dev/null",
+    snprintf(cmd, sizeof(cmd), AVIFENC_BIN " %s %s %s 2>" DEV_NULL,
              cli_extra, input, out_cli);
     cli(cmd);
 
@@ -226,7 +238,7 @@ static void test_stderr_match(void) {
     /* CLI stderr */
     char cmd[512];
     snprintf(cmd, sizeof(cmd),
-             "deps/libwebp/build/cwebp -q 80 -short %s -o %s 2>" TMP "/cli_stderr.txt",
+             CWEBP_BIN " -q 80 -short %s -o %s 2>" TMP "/cli_stderr.txt",
              input, out);
     cli(cmd);
 
@@ -342,7 +354,7 @@ static void test_cwebp_stdin_cli_match(void) {
     /* CLI: cat file | cwebp -q 75 - -o output */
     char cmd[512];
     snprintf(cmd, sizeof(cmd),
-             "cat %s | deps/libwebp/build/cwebp -q 75 -o %s -- - 2>/dev/null", input, out_cli);
+             "cat %s | " CWEBP_BIN " -q 75 -o %s -- - 2>" DEV_NULL, input, out_cli);
     cli(cmd);
 
     /* Bridge: set_stdin + "-- -" */

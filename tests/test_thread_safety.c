@@ -22,7 +22,11 @@
 #endif
 
 #define FIXTURES "tests/fixtures"
+#ifdef _WIN32
+#define TMP "modernimage_test_mt_tmp"
+#else
 #define TMP "/tmp/modernimage_test_mt"
+#endif
 
 static int g_pass = 0, g_fail = 0;
 
