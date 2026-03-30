@@ -1,0 +1,147 @@
+name: Test
+
+on:
+  push:
+    branches: [develop, main]
+  pull_request:
+    branches: [develop, main]
+  workflow_dispatch:
+
+jobs:
+  test:
+    name: Test (${{ matrix.platform }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            platform: linux-x86_64
+          - os: ubuntu-24.04-arm
+            platform: linux-aarch64
+          - os: macos-latest
+            platform: darwin-arm64
+          - os: windows-latest
+            platform: windows-x86_64
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install dependencies (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake ninja-build \
+            libpng-dev libjpeg-dev libgif-dev nasm
+
+      - name: Install dependencies (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          brew install cmake ninja libpng jpeg-turbo giflib nasm
+
+      - name: Setup NASM (Windows)
+        if: runner.os == 'Windows'
+        uses: ilammy/setup-nasm@v1
+
+      - name: Setup MSYS2 (Windows)
+        if: runner.os == 'Windows'
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: UCRT64
+          update: true
+          path-type: inherit
+          install: >-
+            mingw-w64-ucrt-x86_64-gcc
+            mingw-w64-ucrt-x86_64-cmake
+            mingw-w64-ucrt-x86_64-ninja
+            mingw-w64-ucrt-x86_64-libpng
+            mingw-w64-ucrt-x86_64-libjpeg-turbo
+            mingw-w64-ucrt-x86_64-giflib
+            git
+
+      - name: Build deps (Unix)
+        if: runner.os != 'Windows'
+        run: bash scripts/build-deps.sh
+
+      - name: Build deps (Windows)
+        if: runner.os == 'Windows'
+        shell: msys2 {0}
+        run: bash scripts/build-deps.sh
+
+      - name: Build libmodernimage (Unix)
+        if: runner.os != 'Windows'
+        run: bash scripts/build.sh
+
+      - name: Build libmodernimage (Windows)
+        if: runner.os == 'Windows'
+        shell: msys2 {0}
+        run: bash scripts/build.sh
+
+      - name: Run binary equivalence tests (Unix)
+        if: runner.os != 'Windows'
+        run: ./build/test_binary_equiv
+
+      - name: Run binary equivalence tests (Windows)
+        if: runner.os == 'Windows'
+        shell: msys2 {0}
+        run: ./build/test_binary_equiv
+
+      - name: Run thread safety tests (Unix)
+        if: runner.os != 'Windows'
+        run: ./build/test_thread_safety
+
+      - name: Run thread safety tests (Windows)
+        if: runner.os == 'Windows'
+        shell: msys2 {0}
+        run: ./build/test_thread_safety
+
+      - name: Generate cli-compat.json (Unix)
+        if: runner.os != 'Windows'
+        run: bash scripts/generate-cli-compat.sh
+
+      - name: Generate cli-compat.json (Windows)
+        if: runner.os == 'Windows'
+        shell: msys2 {0}
+        run: bash scripts/generate-cli-compat.sh
+
+      - name: Verify artifacts (Unix)
+        if: runner.os != 'Windows'
+        run: |
+          echo "=== Static library ==="
+          ls -lh build/libmodernimage.a
+          echo "=== Shared library ==="
+          ls -lh build/libmodernimage.*dylib build/libmodernimage.so 2>/dev/null || true
+          echo "=== cli-compat.json ==="
+          cat build/cli-compat.json
+
+      - name: Verify artifacts (Windows)
+        if: runner.os == 'Windows'
+        shell: msys2 {0}
+        run: |
+          echo "=== Static library ==="
+          ls -lh build/libmodernimage.a
+          echo "=== Shared library ==="
+          ls -lh build/libmodernimage.dll 2>/dev/null || true
+          echo "=== cli-compat.json ==="
+          cat build/cli-compat.json
+
+      - name: Dump build logs (on failure - Unix)
+        if: failure() && runner.os != 'Windows'
+        run: |
+          echo "=== CMake Error Log ==="
+          cat build/CMakeFiles/CMakeError.log 2>/dev/null || echo "not found"
+          echo "=== CMake Output Log ==="
+          cat build/CMakeFiles/CMakeOutput.log 2>/dev/null || echo "not found"
+
+      - name: Dump build logs (on failure - Windows)
+        if: failure() && runner.os == 'Windows'
+        shell: msys2 {0}
+        run: |
+          echo "=== CMake Error Log ==="
+          cat build/CMakeFiles/CMakeError.log 2>/dev/null || echo "not found"
+          echo "=== CMake Output Log ==="
+          cat build/CMakeFiles/CMakeOutput.log 2>/dev/null || echo "not found"

@@ -1,0 +1,217 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build (${{ matrix.platform }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            platform: linux-x86_64
+          - os: ubuntu-24.04-arm
+            platform: linux-aarch64
+          - os: macos-latest
+            platform: darwin-arm64
+          - os: windows-latest
+            platform: windows-x86_64
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install dependencies (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake ninja-build \
+            libpng-dev libjpeg-dev libgif-dev nasm
+
+      - name: Install dependencies (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          brew install cmake ninja libpng jpeg-turbo giflib nasm
+
+      - name: Setup NASM (Windows)
+        if: runner.os == 'Windows'
+        uses: ilammy/setup-nasm@v1
+
+      - name: Setup MSYS2 (Windows)
+        if: runner.os == 'Windows'
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: UCRT64
+          update: true
+          path-type: inherit
+          install: >-
+            mingw-w64-ucrt-x86_64-gcc
+            mingw-w64-ucrt-x86_64-cmake
+            mingw-w64-ucrt-x86_64-ninja
+            mingw-w64-ucrt-x86_64-libpng
+            mingw-w64-ucrt-x86_64-libjpeg-turbo
+            mingw-w64-ucrt-x86_64-giflib
+            git
+            tar
+
+      - name: Build deps (Unix)
+        if: runner.os != 'Windows'
+        run: bash scripts/build-deps.sh
+
+      - name: Build deps (Windows)
+        if: runner.os == 'Windows'
+        shell: msys2 {0}
+        run: bash scripts/build-deps.sh
+
+      - name: Build libmodernimage (Unix)
+        if: runner.os != 'Windows'
+        run: bash scripts/build.sh
+
+      - name: Build libmodernimage (Windows)
+        if: runner.os == 'Windows'
+        shell: msys2 {0}
+        run: bash scripts/build.sh
+
+      - name: Run tests (Unix)
+        if: runner.os != 'Windows'
+        run: |
+          ./build/test_binary_equiv
+          ./build/test_thread_safety
+
+      - name: Run tests (Windows)
+        if: runner.os == 'Windows'
+        shell: msys2 {0}
+        run: |
+          ./build/test_binary_equiv
+          ./build/test_thread_safety
+
+      - name: Generate cli-compat.json (Unix)
+        if: runner.os != 'Windows'
+        run: bash scripts/generate-cli-compat.sh
+
+      - name: Generate cli-compat.json (Windows)
+        if: runner.os == 'Windows'
+        shell: msys2 {0}
+        run: bash scripts/generate-cli-compat.sh
+
+      - name: Package (Unix)
+        if: runner.os != 'Windows'
+        run: bash scripts/package.sh
+
+      - name: Package (Windows)
+        if: runner.os == 'Windows'
+        shell: msys2 {0}
+        run: bash scripts/package.sh
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: libmodernimage-${{ matrix.platform }}
+          path: build/dist/libmodernimage-*.tar.gz
+
+      - name: Dump build logs (on failure - Unix)
+        if: failure() && runner.os != 'Windows'
+        run: |
+          cat build/CMakeFiles/CMakeError.log 2>/dev/null || true
+
+      - name: Dump build logs (on failure - Windows)
+        if: failure() && runner.os == 'Windows'
+        shell: msys2 {0}
+        run: |
+          cat build/CMakeFiles/CMakeError.log 2>/dev/null || true
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    name: Create Release
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - name: List artifacts
+        run: find artifacts -type f | sort
+
+      - name: Extract version info
+        id: version
+        run: |
+          TAG="${GITHUB_REF_NAME}"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+
+          API_VER=$(echo "$TAG" | sed -n 's/^\(v[0-9.]*\).*/\1/p')
+          WEBP_VER=$(echo "$TAG" | sed -n 's/.*libwebp-\([0-9.]*\).*/\1/p')
+          AVIF_VER=$(echo "$TAG" | sed -n 's/.*libavif-\([0-9.]*\).*/\1/p')
+
+          echo "api_ver=${API_VER:-$TAG}" >> "$GITHUB_OUTPUT"
+          echo "webp_ver=$WEBP_VER" >> "$GITHUB_OUTPUT"
+          echo "avif_ver=$AVIF_VER" >> "$GITHUB_OUTPUT"
+
+      - name: Generate release notes
+        run: |
+          TAG="${{ steps.version.outputs.tag }}"
+          WEBP="${{ steps.version.outputs.webp_ver }}"
+          AVIF="${{ steps.version.outputs.avif_ver }}"
+
+          cat > release_notes.md << EOF
+          ## libmodernimage ${TAG}
+
+          Thread-safe FFI bridge for image format conversion tools.
+
+          ### Bundled tool versions
+          | Tool | Version |
+          |------|---------|
+          EOF
+
+          [ -n "$WEBP" ] && echo "| cwebp / gif2webp | libwebp $WEBP |" >> release_notes.md
+          [ -n "$AVIF" ] && echo "| avifenc | libavif $AVIF |" >> release_notes.md
+
+          cat >> release_notes.md << 'EOF'
+
+          ### Archives
+
+          Each archive contains:
+          - `libmodernimage.a` — fat static library (all deps bundled)
+          - `libmodernimage.so` / `.dylib` / `.dll` — shared library
+          - `modernimage.h` — C header (public API)
+          - `cli-compat.json` — machine-readable CLI compatibility spec
+
+          ### Platforms
+          - `linux-x86_64`
+          - `linux-aarch64`
+          - `darwin-arm64`
+          - `windows-x86_64` (MSYS2 UCRT64)
+
+          ### Linking
+
+          Static linking (only system libs needed):
+          ```
+          cc -o myapp myapp.c -L. -lmodernimage -lpng -ljpeg -lgif -lpthread -lm
+          ```
+          EOF
+
+      - name: Create release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.version.outputs.tag }}
+          name: ${{ steps.version.outputs.tag }}
+          body_path: release_notes.md
+          draft: false
+          prerelease: false
+          files: artifacts/*.tar.gz

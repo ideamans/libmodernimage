@@ -1,0 +1,18 @@
+# Build output
+/build/
+
+# Deps build artifacts (submodules are tracked, build dirs are not)
+/deps/libwebp/build/
+/deps/libavif/build/
+/deps/libavif/ext/aom/
+
+# Editor / IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Claude Code
+.claude/
