@@ -64,10 +64,15 @@ static int files_eq(const char* a, const char* b) {
 }
 
 static int cli(const char* cmd) {
-    int s = system(cmd);
 #ifdef _WIN32
-    return s;  /* system() on Windows already returns the exit code */
+    /* On Windows, system() uses cmd.exe which doesn't understand Unix paths.
+     * Wrap with "bash -c" so MSYS2 bash handles path translation.
+     * Use double quotes for the command to avoid issues with pipe/redirect chars. */
+    char wrapped[2048];
+    snprintf(wrapped, sizeof(wrapped), "bash -c \"%s\"", cmd);
+    return system(wrapped);
 #else
+    int s = system(cmd);
     return WEXITSTATUS(s);
 #endif
 }
