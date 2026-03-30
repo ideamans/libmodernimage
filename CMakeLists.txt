@@ -53,15 +53,18 @@ set(MODERNIMAGE_INCLUDE_DIRS
 
 # ---------- Static libraries to link ----------
 
+# Order matters on Linux (ld processes left-to-right):
+# libraries that USE symbols must come before libraries that DEFINE them
 set(WEBP_LIBS
-    ${WEBP_BUILD}/libwebp.a
-    ${WEBP_BUILD}/libwebpmux.a
-    ${WEBP_BUILD}/libwebpdemux.a
-    ${WEBP_BUILD}/libsharpyuv.a
     ${WEBP_BUILD}/libimagedec.a
     ${WEBP_BUILD}/libimageenc.a
     ${WEBP_BUILD}/libimageioutil.a
     ${WEBP_BUILD}/libexampleutil.a
+    ${WEBP_BUILD}/libwebpmux.a
+    ${WEBP_BUILD}/libwebpdemux.a
+    ${WEBP_BUILD}/libwebp.a
+    ${WEBP_BUILD}/libwebpdecoder.a
+    ${WEBP_BUILD}/libsharpyuv.a
 )
 
 set(AVIF_LIBS

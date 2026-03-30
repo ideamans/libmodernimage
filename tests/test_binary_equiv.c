@@ -6,8 +6,18 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
-#include <unistd.h>
 #include "modernimage.h"
+
+#ifdef _WIN32
+#include <direct.h>
+#include <io.h>
+#define MI_MKDIR(p) _mkdir(p)
+#define MI_UNLINK(p) _unlink(p)
+#else
+#include <unistd.h>
+#define MI_MKDIR(p) mkdir(p, 0755)
+#define MI_UNLINK(p) unlink(p)
+#endif
 
 #define FIXTURES "tests/fixtures"
 #define TMP "/tmp/modernimage_test"
@@ -16,7 +26,7 @@ static int g_pass = 0, g_fail = 0;
 
 static void ensure_dir(const char* p) {
     struct stat st;
-    if (stat(p, &st) != 0) mkdir(p, 0755);
+    if (stat(p, &st) != 0) MI_MKDIR(p);
 }
 
 static long fsize(const char* p) {
@@ -41,7 +51,14 @@ static int files_eq(const char* a, const char* b) {
     return 1;
 }
 
-static int cli(const char* cmd) { int s = system(cmd); return WEXITSTATUS(s); }
+static int cli(const char* cmd) {
+    int s = system(cmd);
+#ifdef _WIN32
+    return s;  /* system() on Windows already returns the exit code */
+#else
+    return WEXITSTATUS(s);
+#endif
+}
 
 /* ---- cwebp tests ---- */
 

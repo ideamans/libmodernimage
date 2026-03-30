@@ -6,10 +6,20 @@
 #include <stdlib.h>
 #include <string.h>
 #include <pthread.h>
-#include <unistd.h>
 #include <sys/stat.h>
-#include <sys/resource.h>
 #include "modernimage.h"
+
+#ifdef _WIN32
+#include <direct.h>
+#include <io.h>
+#define MI_MKDIR(p) _mkdir(p)
+#define MI_UNLINK(p) _unlink(p)
+#else
+#include <unistd.h>
+#include <sys/resource.h>
+#define MI_MKDIR(p) mkdir(p, 0755)
+#define MI_UNLINK(p) unlink(p)
+#endif
 
 #define FIXTURES "tests/fixtures"
 #define TMP "/tmp/modernimage_test_mt"
@@ -18,7 +28,7 @@ static int g_pass = 0, g_fail = 0;
 
 static void ensure_dir(const char* p) {
     struct stat st;
-    if (stat(p, &st) != 0) mkdir(p, 0755);
+    if (stat(p, &st) != 0) MI_MKDIR(p);
 }
 
 typedef struct {
@@ -41,7 +51,7 @@ static void* w_cwebp(void* arg) {
         int rc = modernimage_cwebp(ctx, 6, a);
         (rc == 0) ? r->ok++ : r->fail++;
         modernimage_context_free(ctx);
-        unlink(out);
+        MI_UNLINK(out);
     }
     return NULL;
 }
@@ -57,7 +67,7 @@ static void* w_gif2webp(void* arg) {
         int rc = modernimage_gif2webp(ctx, 4, a);
         (rc == 0) ? r->ok++ : r->fail++;
         modernimage_context_free(ctx);
-        unlink(out);
+        MI_UNLINK(out);
     }
     return NULL;
 }
@@ -74,7 +84,7 @@ static void* w_avifenc(void* arg) {
         int rc = modernimage_avifenc(ctx, 7, a);
         (rc == 0) ? r->ok++ : r->fail++;
         modernimage_context_free(ctx);
-        unlink(out);
+        MI_UNLINK(out);
     }
     return NULL;
 }
@@ -106,7 +116,7 @@ static void* w_mixed(void* arg) {
         }
         (rc == 0) ? r->ok++ : r->fail++;
         modernimage_context_free(ctx);
-        unlink(out);
+        MI_UNLINK(out);
     }
     return NULL;
 }
@@ -124,7 +134,7 @@ static void test_repeated_alloc_free(void) {
         const char* a[] = {"cwebp", "-q", "80", FIXTURES "/test_red_64x64.png", "-o", out};
         modernimage_cwebp(ctx, 6, a);
         modernimage_context_free(ctx);
-        unlink(out);
+        MI_UNLINK(out);
     }
     printf("PASS\n"); g_pass++;
 }
@@ -143,7 +153,7 @@ static void test_context_reuse(void) {
             modernimage_context_free(ctx);
             printf("FAIL (iter %d)\n", i); g_fail++; return;
         }
-        unlink(out);
+        MI_UNLINK(out);
     }
     modernimage_context_free(ctx);
     printf("PASS\n"); g_pass++;
@@ -161,11 +171,13 @@ static void test_memory_growth(void) {
         const char* a[] = {"cwebp", "-q", "80", FIXTURES "/test_red_64x64.png", "-o", out};
         modernimage_cwebp(ctx, 6, a);
         modernimage_context_free(ctx);
-        unlink(out);
+        MI_UNLINK(out);
     }
 
     long rss0 = 0;
+#ifndef _WIN32
     { struct rusage u; getrusage(RUSAGE_SELF, &u); rss0 = u.ru_maxrss / 1024; }
+#endif
 
     for (int i = 0; i < 200; i++) {
         modernimage_context_t* ctx = modernimage_context_new();
@@ -174,11 +186,13 @@ static void test_memory_growth(void) {
         const char* a[] = {"cwebp", "-q", "80", FIXTURES "/test_red_64x64.png", "-o", out};
         modernimage_cwebp(ctx, 6, a);
         modernimage_context_free(ctx);
-        unlink(out);
+        MI_UNLINK(out);
     }
 
     long rss1 = 0;
+#ifndef _WIN32
     { struct rusage u; getrusage(RUSAGE_SELF, &u); rss1 = u.ru_maxrss / 1024; }
+#endif
     long growth = rss1 - rss0;
     printf("(%ldKB -> %ldKB, +%ldKB) ", rss0, rss1, growth);
 
@@ -257,7 +271,7 @@ static void test_output_isolation(void) {
     printf("(call1: %zu bytes, call2: out=%zu err=%zu) ", sz1, sz2_out, sz2_err);
     free(content1);
     modernimage_context_free(ctx);
-    unlink(TMP "/isolation.webp");
+    MI_UNLINK(TMP "/isolation.webp");
 
     if (leaked) { printf("FAIL (leaked)\n"); g_fail++; }
     else { printf("PASS\n"); g_pass++; }
