@@ -108,6 +108,22 @@ jobs:
         shell: msys2 {0}
         run: bash scripts/generate-cli-compat.sh
 
+      - name: Package (Unix)
+        if: runner.os != 'Windows'
+        run: bash scripts/package.sh
+
+      - name: Package (Windows)
+        if: runner.os == 'Windows'
+        shell: msys2 {0}
+        run: bash scripts/package.sh
+
+      # Cache the packaged archive so release.yml can skip the full rebuild
+      - name: Save build cache
+        uses: actions/cache/save@v4
+        with:
+          path: build/dist/
+          key: build-${{ matrix.platform }}-${{ github.sha }}
+
       - name: Verify artifacts (Unix)
         if: runner.os != 'Windows'
         run: |
@@ -115,6 +131,8 @@ jobs:
           ls -lh build/libmodernimage.a
           echo "=== Shared library ==="
           ls -lh build/libmodernimage.*dylib build/libmodernimage.so 2>/dev/null || true
+          echo "=== Package ==="
+          ls -lh build/dist/*.tar.gz
           echo "=== cli-compat.json ==="
           cat build/cli-compat.json
 
@@ -126,6 +144,8 @@ jobs:
           ls -lh build/libmodernimage.a
           echo "=== Shared library ==="
           ls -lh build/libmodernimage.dll 2>/dev/null || true
+          echo "=== Package ==="
+          ls -lh build/dist/*.tar.gz
           echo "=== cli-compat.json ==="
           cat build/cli-compat.json
 
