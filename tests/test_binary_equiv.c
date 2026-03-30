@@ -36,6 +36,15 @@
 
 static int g_pass = 0, g_fail = 0;
 
+/* Strip \r in-place (normalize \r\n → \n for Windows compatibility) */
+static size_t strip_cr(char* buf, size_t len) {
+    size_t j = 0;
+    for (size_t i = 0; i < len; i++) {
+        if (buf[i] != '\r') buf[j++] = buf[i];
+    }
+    return j;
+}
+
 static void ensure_dir(const char* p) {
     struct stat st;
     if (stat(p, &st) != 0) MI_MKDIR(p);
@@ -266,6 +275,10 @@ static void test_stderr_match(void) {
     char* bdata = malloc(bsz + 1);
     modernimage_copy_stderr(ctx, bdata, bsz);
     bdata[bsz] = '\0';
+
+    /* Normalize line endings for cross-platform comparison */
+    csz = (long)strip_cr(cdata, csz); cdata[csz] = '\0';
+    bsz = strip_cr(bdata, bsz); bdata[bsz] = '\0';
 
     if (csz == (long)bsz && memcmp(cdata, bdata, csz) == 0) {
         printf("PASS (%zu bytes)\n", bsz);
