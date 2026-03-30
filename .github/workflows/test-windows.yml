@@ -1,0 +1,62 @@
+name: Test (Windows only)
+
+on:
+  push:
+    branches: [windows]
+
+jobs:
+  test:
+    name: Test (windows-x86_64)
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Setup NASM
+        uses: ilammy/setup-nasm@v1
+
+      - name: Setup MSYS2
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: UCRT64
+          update: true
+          path-type: inherit
+          install: >-
+            mingw-w64-ucrt-x86_64-gcc
+            mingw-w64-ucrt-x86_64-cmake
+            mingw-w64-ucrt-x86_64-ninja
+            mingw-w64-ucrt-x86_64-libpng
+            mingw-w64-ucrt-x86_64-libjpeg-turbo
+            mingw-w64-ucrt-x86_64-giflib
+            git
+
+      - name: Build deps
+        shell: msys2 {0}
+        run: bash scripts/build-deps.sh
+
+      - name: Build libmodernimage
+        shell: msys2 {0}
+        run: bash scripts/build.sh
+
+      - name: Run binary equivalence tests
+        shell: msys2 {0}
+        run: ./build/test_binary_equiv.exe
+
+      - name: Run thread safety tests
+        shell: msys2 {0}
+        run: ./build/test_thread_safety.exe
+
+      - name: Dump build logs (on failure)
+        if: failure()
+        shell: msys2 {0}
+        run: |
+          cat build/CMakeFiles/CMakeError.log 2>/dev/null || true
+          echo "=== build dir ==="
+          ls -la build/ 2>/dev/null || true
+          echo "=== deps webp ==="
+          ls -la deps/libwebp/build/*.a deps/libwebp/build/*.exe 2>/dev/null || true
+          echo "=== deps avif ==="
+          ls -la deps/libavif/build/*.a deps/libavif/build/*.exe 2>/dev/null || true

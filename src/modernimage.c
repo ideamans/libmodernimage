@@ -16,7 +16,8 @@
 #ifdef _WIN32
 #include <io.h>
 #include <fcntl.h>
-#define MI_PIPE(fds) _pipe(fds, 65536, _O_BINARY)
+#define MI_PIPE_TEXT(fds) _pipe(fds, 65536, _O_TEXT)
+#define MI_PIPE_BIN(fds) _pipe(fds, 65536, _O_BINARY)
 #define MI_DUP(fd) _dup(fd)
 #define MI_DUP2(fd1, fd2) _dup2(fd1, fd2)
 #define MI_CLOSE(fd) _close(fd)
@@ -33,7 +34,8 @@
 #endif
 #else
 #include <unistd.h>
-#define MI_PIPE(fds) pipe(fds)
+#define MI_PIPE_TEXT(fds) pipe(fds)
+#define MI_PIPE_BIN(fds) pipe(fds)
 #define MI_DUP(fd) dup(fd)
 #define MI_DUP2(fd1, fd2) dup2(fd1, fd2)
 #define MI_CLOSE(fd) close(fd)
@@ -116,14 +118,16 @@ static int mi_capture_begin(mi_capture_t* cap,
                             pthread_t* stdin_thread, mi_stdin_writer_t* stdin_ctx) {
     cap->has_stdin = (stdin_data != NULL && stdin_size > 0);
 
-    if (MI_PIPE(cap->pipe_out) != 0) return -1;
-    if (MI_PIPE(cap->pipe_err) != 0) {
+    /* stdout/stderr pipes use text mode (for fprintf compatibility on Windows) */
+    if (MI_PIPE_TEXT(cap->pipe_out) != 0) return -1;
+    if (MI_PIPE_TEXT(cap->pipe_err) != 0) {
         MI_CLOSE(cap->pipe_out[0]); MI_CLOSE(cap->pipe_out[1]);
         return -1;
     }
 
     if (cap->has_stdin) {
-        if (MI_PIPE(cap->pipe_in) != 0) {
+        /* stdin pipe uses binary mode (raw image data) */
+        if (MI_PIPE_BIN(cap->pipe_in) != 0) {
             MI_CLOSE(cap->pipe_out[0]); MI_CLOSE(cap->pipe_out[1]);
             MI_CLOSE(cap->pipe_err[0]); MI_CLOSE(cap->pipe_err[1]);
             return -1;
