@@ -10,9 +10,36 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <unistd.h>
 #include <pthread.h>
 #include <errno.h>
+
+#ifdef _WIN32
+#include <io.h>
+#include <fcntl.h>
+#define MI_PIPE(fds) _pipe(fds, 65536, _O_BINARY)
+#define MI_DUP(fd) _dup(fd)
+#define MI_DUP2(fd1, fd2) _dup2(fd1, fd2)
+#define MI_CLOSE(fd) _close(fd)
+#define MI_READ(fd, buf, n) _read(fd, buf, (unsigned int)(n))
+#define MI_WRITE(fd, buf, n) _write(fd, buf, (unsigned int)(n))
+#ifndef STDIN_FILENO
+#define STDIN_FILENO 0
+#endif
+#ifndef STDOUT_FILENO
+#define STDOUT_FILENO 1
+#endif
+#ifndef STDERR_FILENO
+#define STDERR_FILENO 2
+#endif
+#else
+#include <unistd.h>
+#define MI_PIPE(fds) pipe(fds)
+#define MI_DUP(fd) dup(fd)
+#define MI_DUP2(fd1, fd2) dup2(fd1, fd2)
+#define MI_CLOSE(fd) close(fd)
+#define MI_READ(fd, buf, n) read(fd, buf, n)
+#define MI_WRITE(fd, buf, n) write(fd, buf, n)
+#endif
 
 #define MODERNIMAGE_VERSION "0.2.0"
 
@@ -75,12 +102,12 @@ static void* mi_stdin_writer_thread(void* arg) {
     const char* p = (const char*)w->data;
     size_t remaining = w->size;
     while (remaining > 0) {
-        ssize_t n = write(w->fd, p, remaining);
-        if (n <= 0) break;  /* pipe closed or error */
+        int n = (int)MI_WRITE(w->fd, p, remaining > 32768 ? 32768 : remaining);
+        if (n <= 0) break;
         p += n;
         remaining -= (size_t)n;
     }
-    close(w->fd);  /* signal EOF to the reader */
+    MI_CLOSE(w->fd);
     return NULL;
 }
 
@@ -89,58 +116,49 @@ static int mi_capture_begin(mi_capture_t* cap,
                             pthread_t* stdin_thread, mi_stdin_writer_t* stdin_ctx) {
     cap->has_stdin = (stdin_data != NULL && stdin_size > 0);
 
-    /* Create output pipes */
-    if (pipe(cap->pipe_out) != 0) return -1;
-    if (pipe(cap->pipe_err) != 0) {
-        close(cap->pipe_out[0]); close(cap->pipe_out[1]);
+    if (MI_PIPE(cap->pipe_out) != 0) return -1;
+    if (MI_PIPE(cap->pipe_err) != 0) {
+        MI_CLOSE(cap->pipe_out[0]); MI_CLOSE(cap->pipe_out[1]);
         return -1;
     }
 
-    /* Create stdin pipe if needed */
     if (cap->has_stdin) {
-        if (pipe(cap->pipe_in) != 0) {
-            close(cap->pipe_out[0]); close(cap->pipe_out[1]);
-            close(cap->pipe_err[0]); close(cap->pipe_err[1]);
+        if (MI_PIPE(cap->pipe_in) != 0) {
+            MI_CLOSE(cap->pipe_out[0]); MI_CLOSE(cap->pipe_out[1]);
+            MI_CLOSE(cap->pipe_err[0]); MI_CLOSE(cap->pipe_err[1]);
             return -1;
         }
     }
 
-    /* Save original fds */
-    cap->saved_stdout = dup(STDOUT_FILENO);
-    cap->saved_stderr = dup(STDERR_FILENO);
-    cap->saved_stdin = cap->has_stdin ? dup(STDIN_FILENO) : -1;
+    cap->saved_stdout = MI_DUP(STDOUT_FILENO);
+    cap->saved_stderr = MI_DUP(STDERR_FILENO);
+    cap->saved_stdin = cap->has_stdin ? MI_DUP(STDIN_FILENO) : -1;
 
     if (cap->saved_stdout < 0 || cap->saved_stderr < 0 ||
         (cap->has_stdin && cap->saved_stdin < 0)) {
-        close(cap->pipe_out[0]); close(cap->pipe_out[1]);
-        close(cap->pipe_err[0]); close(cap->pipe_err[1]);
-        if (cap->has_stdin) { close(cap->pipe_in[0]); close(cap->pipe_in[1]); }
-        if (cap->saved_stdout >= 0) close(cap->saved_stdout);
-        if (cap->saved_stderr >= 0) close(cap->saved_stderr);
-        if (cap->saved_stdin >= 0) close(cap->saved_stdin);
+        MI_CLOSE(cap->pipe_out[0]); MI_CLOSE(cap->pipe_out[1]);
+        MI_CLOSE(cap->pipe_err[0]); MI_CLOSE(cap->pipe_err[1]);
+        if (cap->has_stdin) { MI_CLOSE(cap->pipe_in[0]); MI_CLOSE(cap->pipe_in[1]); }
+        if (cap->saved_stdout >= 0) MI_CLOSE(cap->saved_stdout);
+        if (cap->saved_stderr >= 0) MI_CLOSE(cap->saved_stderr);
+        if (cap->saved_stdin >= 0) MI_CLOSE(cap->saved_stdin);
         return -1;
     }
 
-    /* Redirect stdout/stderr to pipe write ends */
     fflush(stdout);
     fflush(stderr);
-    dup2(cap->pipe_out[1], STDOUT_FILENO);
-    dup2(cap->pipe_err[1], STDERR_FILENO);
-    close(cap->pipe_out[1]);
-    close(cap->pipe_err[1]);
+    MI_DUP2(cap->pipe_out[1], STDOUT_FILENO);
+    MI_DUP2(cap->pipe_err[1], STDERR_FILENO);
+    MI_CLOSE(cap->pipe_out[1]);
+    MI_CLOSE(cap->pipe_err[1]);
 
-    /* Redirect stdin to pipe read end, and start writer thread */
     if (cap->has_stdin) {
-        /* Clear any buffered/EOF state in C stdio stdin before redirecting fd */
         fflush(stdin);
-        dup2(cap->pipe_in[0], STDIN_FILENO);
-        close(cap->pipe_in[0]);
-        /* Reset C stdio stream to pick up the new fd and clear EOF */
+        MI_DUP2(cap->pipe_in[0], STDIN_FILENO);
+        MI_CLOSE(cap->pipe_in[0]);
         clearerr(stdin);
         fseek(stdin, 0, SEEK_SET);
 
-        /* Write stdin data in a separate thread to avoid deadlock
-         * (tool reads stdin while pipe buffer is full) */
         stdin_ctx->fd = cap->pipe_in[1];
         stdin_ctx->data = stdin_data;
         stdin_ctx->size = stdin_size;
@@ -152,8 +170,8 @@ static int mi_capture_begin(mi_capture_t* cap,
 
 static void mi_drain_pipe(int fd, mi_buffer_t* buf) {
     char tmp[4096];
-    ssize_t n;
-    while ((n = read(fd, tmp, sizeof(tmp))) > 0) {
+    int n;
+    while ((n = (int)MI_READ(fd, tmp, sizeof(tmp))) > 0) {
         mi_buffer_write(buf, tmp, (size_t)n);
     }
 }
@@ -163,24 +181,21 @@ static void mi_capture_end(mi_capture_t* cap, mi_buffer_t* out_buf, mi_buffer_t*
     fflush(stdout);
     fflush(stderr);
 
-    /* Restore original fds */
-    dup2(cap->saved_stdout, STDOUT_FILENO);
-    dup2(cap->saved_stderr, STDERR_FILENO);
-    close(cap->saved_stdout);
-    close(cap->saved_stderr);
+    MI_DUP2(cap->saved_stdout, STDOUT_FILENO);
+    MI_DUP2(cap->saved_stderr, STDERR_FILENO);
+    MI_CLOSE(cap->saved_stdout);
+    MI_CLOSE(cap->saved_stderr);
 
     if (cap->has_stdin) {
-        dup2(cap->saved_stdin, STDIN_FILENO);
-        close(cap->saved_stdin);
-        /* Wait for stdin writer thread to finish */
+        MI_DUP2(cap->saved_stdin, STDIN_FILENO);
+        MI_CLOSE(cap->saved_stdin);
         pthread_join(*stdin_thread, NULL);
     }
 
-    /* Read remaining data from output pipes */
     mi_drain_pipe(cap->pipe_out[0], out_buf);
     mi_drain_pipe(cap->pipe_err[0], err_buf);
-    close(cap->pipe_out[0]);
-    close(cap->pipe_err[0]);
+    MI_CLOSE(cap->pipe_out[0]);
+    MI_CLOSE(cap->pipe_err[0]);
 }
 
 /* ========== Generic tool runner ========== */
