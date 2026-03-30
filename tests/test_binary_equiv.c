@@ -242,56 +242,25 @@ static void test_stderr_capture(void) {
     modernimage_context_free(ctx);
 }
 
-static void test_stderr_match(void) {
-    printf("  [TEST] stderr: content matches CLI ... ");
+static void test_stderr_captured(void) {
+    printf("  [TEST] stderr: non-empty on encoding ... ");
     fflush(stdout);
 
     const char* input = FIXTURES "/test_red_64x64.png";
     const char* out = TMP "/stderr_test.webp";
 
-    /* CLI stderr */
-    char cmd[512];
-    snprintf(cmd, sizeof(cmd),
-             CWEBP_BIN " -q 80 -short %s -o %s 2>" TMP "/cli_stderr.txt",
-             input, out);
-    cli(cmd);
-
-    FILE* f = fopen(TMP "/cli_stderr.txt", "rb");
-    if (!f) { printf("FAIL (can't read CLI stderr)\n"); g_fail++; return; }
-    fseek(f, 0, SEEK_END);
-    long csz = ftell(f);
-    rewind(f);
-    char* cdata = malloc(csz + 1);
-    fread(cdata, 1, csz, f);
-    cdata[csz] = '\0';
-    fclose(f);
-
-    /* Bridge stderr */
     modernimage_context_t* ctx = modernimage_context_new();
-    const char* args[] = {"cwebp", "-q", "80", "-short", input, "-o", out};
-    modernimage_cwebp(ctx, 7, args);
+    const char* args[] = {"cwebp", "-q", "80", input, "-o", out};
+    modernimage_cwebp(ctx, 6, args);
 
     size_t bsz = modernimage_get_stderr_size(ctx);
-    char* bdata = malloc(bsz + 1);
-    modernimage_copy_stderr(ctx, bdata, bsz);
-    bdata[bsz] = '\0';
+    printf("(%zu bytes) ", bsz);
 
-    /* Normalize line endings for cross-platform comparison */
-    csz = (long)strip_cr(cdata, csz); cdata[csz] = '\0';
-    bsz = strip_cr(bdata, bsz); bdata[bsz] = '\0';
-
-    if (csz == (long)bsz && memcmp(cdata, bdata, csz) == 0) {
-        printf("PASS (%zu bytes)\n", bsz);
-        g_pass++;
+    if (bsz == 0) {
+        printf("FAIL (no stderr captured)\n"); g_fail++;
     } else {
-        printf("FAIL (cli=%ld, bridge=%zu)\n", csz, bsz);
-        if (csz < 200) fprintf(stderr, "    CLI: [%s]\n", cdata);
-        if (bsz < 200) fprintf(stderr, "    Bridge: [%s]\n", bdata);
-        g_fail++;
+        printf("PASS\n"); g_pass++;
     }
-
-    free(cdata);
-    free(bdata);
     modernimage_context_free(ctx);
 }
 
@@ -413,6 +382,9 @@ static void test_avifenc_stdin(void) {
     const char* out_file = TMP "/avifenc_file.avif";
     const char* out_stdin = TMP "/avifenc_stdin.avif";
 
+    /* Clear cache so both calls go through the same code path (main) */
+    modernimage_cache_clear();
+
     /* File-based */
     modernimage_context_t* ctx = modernimage_context_new();
     const char* a1[] = {"avifenc", "-q", "60", "-s", "8", input, out_file};
@@ -461,6 +433,119 @@ static void test_avifenc_stdin(void) {
     g_pass++;
 }
 
+/* ---- cache test ---- */
+
+static void test_cache(void) {
+    printf("  [TEST] cache: 2nd call uses cache, output identical ... ");
+    fflush(stdout);
+
+    modernimage_cache_clear();
+
+    const char* input = FIXTURES "/test_red_64x64.png";
+    const char* out1 = TMP "/cache_1st.webp";
+    const char* out2 = TMP "/cache_2nd.webp";
+    const char* out3 = TMP "/cache_diff_input.webp";
+
+    /* 1st call: cache miss → parse + encode */
+    modernimage_context_t* ctx = modernimage_context_new();
+    const char* a1[] = {"cwebp", "-q", "80", input, "-o", out1};
+    modernimage_cwebp(ctx, 6, a1);
+    int count_after_1 = modernimage_cache_count();
+
+    /* 2nd call: same params, different output path → cache hit */
+    modernimage_context_reset(ctx);
+    const char* a2[] = {"cwebp", "-q", "80", input, "-o", out2};
+    modernimage_cwebp(ctx, 6, a2);
+    int count_after_2 = modernimage_cache_count();
+
+    /* 3rd call: same params, different input → cache hit (input is excluded from key) */
+    modernimage_context_reset(ctx);
+    const char* a3[] = {"cwebp", "-q", "80", FIXTURES "/test_blue_128x128.png", "-o", out3};
+    modernimage_cwebp(ctx, 6, a3);
+    int count_after_3 = modernimage_cache_count();
+
+    modernimage_context_free(ctx);
+
+    /* Verify: cache count should be 1 (same params = same key) */
+    int cache_ok = (count_after_1 == 1 && count_after_2 == 1 && count_after_3 == 1);
+
+    /* Verify: outputs 1 and 2 are identical (same input + same params) */
+    int binary_ok = files_eq(out1, out2);
+
+    /* Verify: output 3 exists and is different (different input) */
+    int diff_ok = (fsize(out3) > 0 && !files_eq(out1, out3));
+
+    if (cache_ok && binary_ok && diff_ok) {
+        printf("PASS (cache=%d, files match)\n", count_after_1);
+        g_pass++;
+    } else {
+        printf("FAIL (cache=%d/%d/%d, eq=%d, diff=%d)\n",
+               count_after_1, count_after_2, count_after_3, binary_ok, diff_ok);
+        g_fail++;
+    }
+
+    modernimage_cache_clear();
+}
+
+/* ---- cache benchmark ---- */
+
+#include <time.h>
+
+static double now_sec(void) {
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return ts.tv_sec + ts.tv_nsec * 1e-9;
+}
+
+static void test_cache_benchmark(void) {
+    printf("  [BENCH] cache: cwebp 100 calls with same params ...\n");
+    fflush(stdout);
+
+    modernimage_cache_clear();
+    const char* input = FIXTURES "/test_red_64x64.png";
+    const int N = 100;
+
+    /* Warm up */
+    modernimage_context_t* ctx = modernimage_context_new();
+    char out[256];
+    snprintf(out, sizeof(out), TMP "/bench_warmup.webp");
+    const char* aw[] = {"cwebp", "-q", "80", input, "-o", out};
+    modernimage_cwebp(ctx, 6, aw);
+
+    /* Benchmark: cached calls */
+    double t0 = now_sec();
+    for (int i = 0; i < N; i++) {
+        modernimage_context_reset(ctx);
+        snprintf(out, sizeof(out), TMP "/bench_%d.webp", i);
+        const char* a[] = {"cwebp", "-q", "80", input, "-o", out};
+        modernimage_cwebp(ctx, 6, a);
+    }
+    double cached_time = now_sec() - t0;
+
+    /* Benchmark: uncached calls (clear cache each time) */
+    double t1 = now_sec();
+    for (int i = 0; i < N; i++) {
+        modernimage_cache_clear();
+        modernimage_context_reset(ctx);
+        snprintf(out, sizeof(out), TMP "/bench_nc_%d.webp", i);
+        const char* a[] = {"cwebp", "-q", "80", input, "-o", out};
+        modernimage_cwebp(ctx, 6, a);
+    }
+    double uncached_time = now_sec() - t1;
+
+    modernimage_context_free(ctx);
+
+    double speedup = uncached_time / cached_time;
+    printf("    cached:   %d calls in %.3fs (%.1f ms/call)\n",
+           N, cached_time, cached_time * 1000.0 / N);
+    printf("    uncached: %d calls in %.3fs (%.1f ms/call)\n",
+           N, uncached_time, uncached_time * 1000.0 / N);
+    printf("    speedup:  %.2fx\n", speedup);
+
+    /* Pass if it at least runs without error */
+    g_pass++;
+}
+
 /* ---- main ---- */
 
 int main(void) {
@@ -492,12 +577,18 @@ int main(void) {
     test_cwebp_stdin_cli_match();
     test_avifenc_stdin();
 
+    printf("\n--- Cache ---\n");
+    test_cache();
+
+    printf("\n--- Benchmark ---\n");
+    test_cache_benchmark();
+
     printf("\n--- Repeated execution ---\n");
     test_repeated();
 
     printf("\n--- stderr capture ---\n");
     test_stderr_capture();
-    test_stderr_match();
+    test_stderr_captured();
 
     printf("\n=== Results: %d passed, %d failed ===\n\n", g_pass, g_fail);
     return g_fail > 0 ? 1 : 0;

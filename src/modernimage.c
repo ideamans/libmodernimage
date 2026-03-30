@@ -7,6 +7,9 @@
 
 #include "modernimage.h"
 #include "modernimage_internal.h"
+#include "cache.h"
+#include "engine_cwebp.h"
+#include "engine_avifenc.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -323,10 +326,190 @@ void modernimage_set_stdin(modernimage_context_t* ctx,
     ctx->stdin_size = size;
 }
 
+/* ========== Global config cache ========== */
+
+static mi_cache_t g_config_cache = {NULL, 0};
+static pthread_mutex_t g_cache_mutex = PTHREAD_MUTEX_INITIALIZER;
+
+/* ========== cwebp with cache ========== */
+
+static void mi_cwebp_params_free(void* p) { free(p); }
+
+static int mi_run_cwebp_cached(modernimage_context_t* ctx,
+                               int argc, const char* argv[]) {
+    /* Find I/O indices for cache key */
+    int skip_indices[8];
+    int skip_count = mi_cwebp_io_indices(argc, argv, skip_indices, 8);
+    char* key = mi_cache_make_key("cwebp", argc, argv, skip_indices, skip_count);
+    if (!key) return mi_run_tool(ctx, modernimage_cwebp_main, argc, argv);
+
+    /* Check cache */
+    pthread_mutex_lock(&g_cache_mutex);
+    mi_cwebp_params_t* cached = (mi_cwebp_params_t*)mi_cache_get(&g_config_cache, key);
+    pthread_mutex_unlock(&g_cache_mutex);
+
+    if (cached) {
+        /* Cache hit: extract I/O paths and call encode directly */
+        const char* in_file = NULL;
+        const char* out_file = NULL;
+        /* Quick extraction of I/O from argv (no full parse needed) */
+        for (int c = 1; c < argc; ++c) {
+            if (!strcmp(argv[c], "-o") && c + 1 < argc) {
+                out_file = argv[++c];
+            } else if (!strcmp(argv[c], "--") && c + 1 < argc) {
+                in_file = argv[++c]; break;
+            } else if (argv[c][0] != '-') {
+                in_file = argv[c];
+            }
+        }
+
+        /* Run encode with dup2 capture */
+        mi_buffer_reset(&ctx->out_buf);
+        mi_buffer_reset(&ctx->err_buf);
+        mi_capture_t cap;
+        pthread_t stdin_thread;
+        mi_stdin_writer_t stdin_ctx_data;
+        pthread_mutex_lock(&g_io_mutex);
+        if (mi_capture_begin(&cap, ctx->stdin_data, ctx->stdin_size,
+                             &stdin_thread, &stdin_ctx_data) != 0) {
+            pthread_mutex_unlock(&g_io_mutex);
+            free(key);
+            ctx->exit_code = -1;
+            return -1;
+        }
+        ctx->exit_code = mi_cwebp_encode(cached, in_file, out_file);
+        mi_capture_end(&cap, &ctx->out_buf, &ctx->err_buf, &stdin_thread);
+        pthread_mutex_unlock(&g_io_mutex);
+        free(key);
+        return ctx->exit_code;
+    }
+
+    /* Cache miss: parse + encode + cache the params */
+    mi_cwebp_params_t* params = calloc(1, sizeof(mi_cwebp_params_t));
+    if (!params) { free(key); return mi_run_tool(ctx, modernimage_cwebp_main, argc, argv); }
+
+    const char* in_file = NULL;
+    const char* out_file = NULL;
+
+    mi_buffer_reset(&ctx->out_buf);
+    mi_buffer_reset(&ctx->err_buf);
+    mi_capture_t cap;
+    pthread_t stdin_thread;
+    mi_stdin_writer_t stdin_ctx_data;
+    pthread_mutex_lock(&g_io_mutex);
+    if (mi_capture_begin(&cap, ctx->stdin_data, ctx->stdin_size,
+                         &stdin_thread, &stdin_ctx_data) != 0) {
+        pthread_mutex_unlock(&g_io_mutex);
+        free(params); free(key);
+        ctx->exit_code = -1;
+        return -1;
+    }
+
+    int parse_ok = mi_cwebp_parse(params, argc, argv, &in_file, &out_file);
+    if (parse_ok != 0) {
+        /* Parse failed: fall back to original main() */
+        ctx->exit_code = modernimage_cwebp_main(argc, argv);
+    } else {
+        ctx->exit_code = mi_cwebp_encode(params, in_file, out_file);
+    }
+
+    mi_capture_end(&cap, &ctx->out_buf, &ctx->err_buf, &stdin_thread);
+    pthread_mutex_unlock(&g_io_mutex);
+
+    if (parse_ok == 0) {
+        /* Cache the successfully parsed params */
+        pthread_mutex_lock(&g_cache_mutex);
+        mi_cache_put(&g_config_cache, key, params, mi_cwebp_params_free);
+        pthread_mutex_unlock(&g_cache_mutex);
+    } else {
+        free(params);
+    }
+    free(key);
+    return ctx->exit_code;
+}
+
+/* ========== avifenc with cache ========== */
+
+static void mi_avifenc_params_free(void* p) { free(p); }
+
+static int mi_run_avifenc_cached(modernimage_context_t* ctx,
+                                 int argc, const char* argv[]) {
+    int skip_indices[8];
+    int skip_count = mi_avifenc_io_indices(argc, argv, skip_indices, 8);
+    char* key = mi_cache_make_key("avifenc", argc, argv, skip_indices, skip_count);
+    if (!key) return mi_run_tool_avif(ctx, modernimage_avifenc_main, argc, argv);
+
+    pthread_mutex_lock(&g_cache_mutex);
+    mi_avifenc_params_t* cached = (mi_avifenc_params_t*)mi_cache_get(&g_config_cache, key);
+    pthread_mutex_unlock(&g_cache_mutex);
+
+    if (cached) {
+        /* Cache hit: extract I/O paths */
+        const char* in_file = NULL;
+        const char* out_file = NULL;
+        for (int i = 1; i < argc; ++i) {
+            if ((!strcmp(argv[i], "-o") || !strcmp(argv[i], "--output")) && i + 1 < argc) {
+                out_file = argv[++i];
+            } else if (!strcmp(argv[i], "--stdin")) {
+                in_file = "(stdin)";
+            } else if (argv[i][0] == '-') {
+                if (i + 1 < argc && argv[i+1][0] != '-') ++i;
+            } else {
+                if (!in_file) in_file = argv[i];
+                else if (!out_file) out_file = argv[i];
+            }
+        }
+
+        mi_buffer_reset(&ctx->out_buf);
+        mi_buffer_reset(&ctx->err_buf);
+        mi_capture_t cap;
+        pthread_t stdin_thread;
+        mi_stdin_writer_t stdin_ctx_data;
+        pthread_mutex_lock(&g_io_mutex);
+        if (mi_capture_begin(&cap, ctx->stdin_data, ctx->stdin_size,
+                             &stdin_thread, &stdin_ctx_data) != 0) {
+            pthread_mutex_unlock(&g_io_mutex);
+            free(key);
+            ctx->exit_code = -1;
+            return -1;
+        }
+        ctx->exit_code = mi_avifenc_encode(cached, in_file, out_file);
+        mi_capture_end(&cap, &ctx->out_buf, &ctx->err_buf, &stdin_thread);
+        pthread_mutex_unlock(&g_io_mutex);
+        free(key);
+        return ctx->exit_code;
+    }
+
+    /* Cache miss: run original main() first (guarantees CLI compatibility),
+     * then parse argv to cache the config for subsequent calls. */
+    int rc = mi_run_tool_avif(ctx, modernimage_avifenc_main, argc, argv);
+
+    /* Parse and cache for next time (best-effort, don't fail if parse fails) */
+    mi_avifenc_params_t* params = calloc(1, sizeof(mi_avifenc_params_t));
+    if (params) {
+        char** argv_copy = malloc(sizeof(char*) * (argc + 1));
+        if (argv_copy) {
+            for (int i = 0; i < argc; i++) argv_copy[i] = strdup(argv[i]);
+            argv_copy[argc] = NULL;
+            if (mi_avifenc_parse(params, argc, argv_copy, NULL, NULL) == 0) {
+                pthread_mutex_lock(&g_cache_mutex);
+                mi_cache_put(&g_config_cache, key, params, mi_avifenc_params_free);
+                pthread_mutex_unlock(&g_cache_mutex);
+                params = NULL; /* ownership transferred to cache */
+            }
+            for (int i = 0; i < argc; i++) free(argv_copy[i]);
+            free(argv_copy);
+        }
+        free(params); /* free if not transferred */
+    }
+    free(key);
+    return rc;
+}
+
 /* ========== Public API ========== */
 
 int modernimage_cwebp(modernimage_context_t* ctx, int argc, const char* argv[]) {
-    return mi_run_tool(ctx, modernimage_cwebp_main, argc, argv);
+    return mi_run_cwebp_cached(ctx, argc, argv);
 }
 
 int modernimage_gif2webp(modernimage_context_t* ctx, int argc, const char* argv[]) {
@@ -334,7 +517,7 @@ int modernimage_gif2webp(modernimage_context_t* ctx, int argc, const char* argv[
 }
 
 int modernimage_avifenc(modernimage_context_t* ctx, int argc, const char* argv[]) {
-    return mi_run_tool_avif(ctx, modernimage_avifenc_main, argc, argv);
+    return mi_run_avifenc_cached(ctx, argc, argv);
 }
 
 /* ========== Output access ========== */
@@ -365,6 +548,21 @@ size_t modernimage_copy_stderr(const modernimage_context_t* ctx,
 
 int modernimage_get_exit_code(const modernimage_context_t* ctx) {
     return ctx ? ctx->exit_code : -1;
+}
+
+/* ========== Cache management ========== */
+
+void modernimage_cache_clear(void) {
+    pthread_mutex_lock(&g_cache_mutex);
+    mi_cache_clear(&g_config_cache);
+    pthread_mutex_unlock(&g_cache_mutex);
+}
+
+int modernimage_cache_count(void) {
+    pthread_mutex_lock(&g_cache_mutex);
+    int count = g_config_cache.count;
+    pthread_mutex_unlock(&g_cache_mutex);
+    return count;
 }
 
 const char* modernimage_version(void) {

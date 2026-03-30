@@ -82,6 +82,21 @@ size_t modernimage_copy_stderr(const modernimage_context_t* ctx,
 int modernimage_get_exit_code(const modernimage_context_t* ctx);
 
 /*
+ * Cache management
+ *
+ * Parsed tool configurations are cached transparently, keyed by
+ * argv content (excluding input/output paths). Same parameters
+ * with different files reuse the cached config, skipping arg
+ * parsing and validation on subsequent calls.
+ */
+
+/* Clear all cached configurations. */
+void modernimage_cache_clear(void);
+
+/* Get the number of cached configurations. */
+int modernimage_cache_count(void);
+
+/*
  * Version info
  */
 const char* modernimage_version(void);

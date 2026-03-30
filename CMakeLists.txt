@@ -24,6 +24,9 @@ find_path(GIF_INCLUDE_DIR gif_lib.h PATHS /opt/homebrew/include)
 
 set(MODERNIMAGE_SOURCES
     src/modernimage.c
+    src/cache.c
+    src/engine_cwebp.c
+    src/engine_avifenc.c
     src/bridge_cwebp.c
     src/bridge_gif2webp.c
     src/bridge_avifenc.c
