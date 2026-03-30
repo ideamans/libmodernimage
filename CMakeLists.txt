@@ -67,9 +67,10 @@ set(WEBP_LIBS
     ${WEBP_BUILD}/libsharpyuv.a
 )
 
+# avif_apps uses avif_internal, avif_internal uses aom
 set(AVIF_LIBS
-    ${AVIF_BUILD}/libavif_internal.a
     ${AVIF_BUILD}/libavif_apps.a
+    ${AVIF_BUILD}/libavif_internal.a
     ${AOM_BUILD}/libaom.a
 )
 
