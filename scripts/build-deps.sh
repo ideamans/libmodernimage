@@ -103,10 +103,12 @@ echo "--- libwebp ---"
 WEBP_DIR="$DEPS_DIR/libwebp"
 WEBP_BUILD="$WEBP_DIR/build"
 
+# Point to self-built image libs and force static linking for CLI tools
 cmake -G Ninja -S "$WEBP_DIR" -B "$WEBP_BUILD" \
   -DCMAKE_BUILD_TYPE=Release \
   -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
   -DCMAKE_PREFIX_PATH="$PREFIX" \
+  -DWEBP_LINK_STATIC=ON \
   -DWEBP_UNICODE=OFF \
   -DWEBP_BUILD_CWEBP=ON \
   -DWEBP_BUILD_DWEBP=ON \
@@ -116,7 +118,15 @@ cmake -G Ninja -S "$WEBP_DIR" -B "$WEBP_BUILD" \
   -DWEBP_BUILD_WEBPINFO=ON \
   -DWEBP_BUILD_ANIM_UTILS=ON \
   -DWEBP_BUILD_VWEBP=OFF \
-  -DWEBP_BUILD_EXTRAS=OFF
+  -DWEBP_BUILD_EXTRAS=OFF \
+  -DJPEG_LIBRARY="$PREFIX/lib/libjpeg.a" \
+  -DJPEG_INCLUDE_DIR="$PREFIX/include" \
+  -DPNG_LIBRARY="$PREFIX/lib/libpng16.a" \
+  -DPNG_PNG_INCLUDE_DIR="$PREFIX/include" \
+  -DZLIB_LIBRARY="$PREFIX/lib/libz.a" \
+  -DZLIB_INCLUDE_DIR="$PREFIX/include" \
+  -DGIF_LIBRARY="$PREFIX/lib/libgif.a" \
+  -DGIF_INCLUDE_DIR="$PREFIX/include"
 
 cmake --build "$WEBP_BUILD" --config Release --parallel "$JOBS"
 echo "libwebp: OK"
@@ -159,7 +169,13 @@ cmake -G Ninja -S "$AVIF_DIR" -B "$AVIF_BUILD" \
   -DBUILD_SHARED_LIBS=OFF \
   -DAVIF_CODEC_AOM=LOCAL \
   -DAVIF_BUILD_APPS=ON \
-  -DAVIF_LIBYUV=OFF
+  -DAVIF_LIBYUV=OFF \
+  -DPNG_PNG_INCLUDE_DIR="$PREFIX/include" \
+  -DPNG_LIBRARY="$PREFIX/lib/libpng16.a" \
+  -DJPEG_INCLUDE_DIR="$PREFIX/include" \
+  -DJPEG_LIBRARY="$PREFIX/lib/libjpeg.a" \
+  -DZLIB_INCLUDE_DIR="$PREFIX/include" \
+  -DZLIB_LIBRARY="$PREFIX/lib/libz.a"
 
 cmake --build "$AVIF_BUILD" --config Release --parallel "$JOBS"
 echo "libavif: OK"
