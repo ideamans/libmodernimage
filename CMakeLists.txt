@@ -44,7 +44,7 @@ else()
     message(STATUS "Using self-built libjpeg: ${JPEG_LIBRARY}")
 endif()
 
-find_library(Z_LIBRARY NAMES libz.a z
+find_library(Z_LIBRARY NAMES libz.a libzlibstatic.a z
     PATHS ${DEPS_PREFIX}/lib NO_DEFAULT_PATH)
 if(NOT Z_LIBRARY)
     find_library(Z_LIBRARY z)

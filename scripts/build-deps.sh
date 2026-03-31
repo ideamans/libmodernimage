@@ -31,6 +31,10 @@ cmake -G Ninja -S "$ZLIB_DIR" -B "$ZLIB_DIR/build" \
   -DBUILD_SHARED_LIBS=OFF
 cmake --build "$ZLIB_DIR/build" --parallel "$JOBS"
 cmake --install "$ZLIB_DIR/build"
+# Windows: zlib installs as libzlibstatic.a, create libz.a symlink for compatibility
+if [ -f "$PREFIX/lib/libzlibstatic.a" ] && [ ! -f "$PREFIX/lib/libz.a" ]; then
+  cp "$PREFIX/lib/libzlibstatic.a" "$PREFIX/lib/libz.a"
+fi
 echo "zlib: OK"
 
 # ---------- libpng (depends on zlib) ----------
