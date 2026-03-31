@@ -30,7 +30,7 @@ Requires: cmake, ninja, libpng-dev, libjpeg-dev, libgif-dev
 
 ```bash
 # Static (all deps bundled — only system libs needed)
-cc -o myapp myapp.c -Lbuild -lmodernimage -lpng -ljpeg -lgif -lpthread -lm
+cc -o myapp myapp.c -Lbuild -lmodernimage -lpthread -lm
 
 # Dynamic
 cc -o myapp myapp.c -Lbuild -lmodernimage -lpthread

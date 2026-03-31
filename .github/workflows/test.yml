@@ -35,13 +35,12 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y cmake ninja-build \
-            libpng-dev libjpeg-dev libgif-dev nasm
+          sudo apt-get install -y cmake ninja-build nasm
 
       - name: Install dependencies (macOS)
         if: runner.os == 'macOS'
         run: |
-          brew install cmake ninja libpng jpeg-turbo giflib nasm
+          brew install cmake ninja nasm
 
       - name: Setup NASM (Windows)
         if: runner.os == 'Windows'
@@ -58,10 +57,9 @@ jobs:
             mingw-w64-ucrt-x86_64-gcc
             mingw-w64-ucrt-x86_64-cmake
             mingw-w64-ucrt-x86_64-ninja
-            mingw-w64-ucrt-x86_64-libpng
-            mingw-w64-ucrt-x86_64-libjpeg-turbo
-            mingw-w64-ucrt-x86_64-giflib
             git
+            curl
+            tar
 
       - name: Build deps (Unix)
         if: runner.os != 'Windows'

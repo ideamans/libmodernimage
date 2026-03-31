@@ -2,9 +2,14 @@
 /build/
 
 # Deps build artifacts (submodules are tracked, build dirs are not)
+/deps-build/
 /deps/libwebp/build/
 /deps/libavif/build/
 /deps/libavif/ext/aom/
+/deps/zlib/
+/deps/libpng/
+/deps/libjpeg-turbo/
+/deps/giflib/
 
 # Editor / IDE
 .vscode/

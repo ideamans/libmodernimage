@@ -35,9 +35,10 @@ for ext in dylib so dll; do
   fi
 done
 
-# Copy header and metadata
+# Copy header, metadata, and licenses
 cp "$ROOT_DIR/include/modernimage.h" "$STAGING/"
 cp "$BUILD_DIR/cli-compat.json" "$STAGING/" 2>/dev/null || true
+cp "$ROOT_DIR/THIRD_PARTY_LICENSES" "$STAGING/" 2>/dev/null || true
 
 # Create archive
 ARCHIVE="$OUTPUT_DIR/libmodernimage-${PLATFORM}.tar.gz"

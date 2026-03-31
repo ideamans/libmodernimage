@@ -30,7 +30,7 @@ cd libmodernimage
 
 ```bash
 # 静的リンク（全依存を含む.a — システムライブラリのみ追加で必要）
-cc -o myapp myapp.c -Lbuild -lmodernimage -lpng -ljpeg -lgif -lpthread -lm
+cc -o myapp myapp.c -Lbuild -lmodernimage -lpthread -lm
 
 # 動的リンク
 cc -o myapp myapp.c -Lbuild -lmodernimage -lpthread

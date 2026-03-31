@@ -12,13 +12,54 @@ set(AVIF_DIR ${CMAKE_SOURCE_DIR}/deps/libavif)
 set(AVIF_BUILD ${AVIF_DIR}/build)
 set(AOM_BUILD ${AVIF_DIR}/ext/aom/build.libavif)
 
-# ---------- Find system libraries ----------
+# Self-built deps prefix (from scripts/build-deps.sh)
+set(DEPS_PREFIX ${CMAKE_SOURCE_DIR}/deps-build)
+
+# ---------- Find libraries ----------
+# Prefer self-built static libraries in deps-build/, fall back to system
 
 find_package(Threads REQUIRED)
-find_package(PNG REQUIRED)
-find_package(JPEG REQUIRED)
-find_library(GIF_LIBRARY gif PATHS /opt/homebrew/lib)
-find_path(GIF_INCLUDE_DIR gif_lib.h PATHS /opt/homebrew/include)
+
+# Look in our prefix first
+# Check for self-built libpng (explicit .a path to avoid framework detection)
+if(EXISTS "${DEPS_PREFIX}/lib/libpng16.a")
+    set(PNG_LIBRARY "${DEPS_PREFIX}/lib/libpng16.a")
+    set(PNG_INCLUDE_DIR "${DEPS_PREFIX}/include")
+    message(STATUS "Using self-built libpng: ${PNG_LIBRARY}")
+else()
+    find_package(PNG REQUIRED)
+    set(PNG_LIBRARY ${PNG_LIBRARIES})
+endif()
+find_path(PNG_INCLUDE_DIR png.h
+    PATHS ${DEPS_PREFIX}/include NO_DEFAULT_PATH)
+
+find_library(JPEG_LIBRARY NAMES libjpeg.a jpeg
+    PATHS ${DEPS_PREFIX}/lib NO_DEFAULT_PATH)
+find_path(JPEG_INCLUDE_DIR jpeglib.h
+    PATHS ${DEPS_PREFIX}/include NO_DEFAULT_PATH)
+if(NOT JPEG_LIBRARY)
+    find_package(JPEG REQUIRED)
+    set(JPEG_LIBRARY ${JPEG_LIBRARIES})
+else()
+    message(STATUS "Using self-built libjpeg: ${JPEG_LIBRARY}")
+endif()
+
+find_library(Z_LIBRARY NAMES libz.a z
+    PATHS ${DEPS_PREFIX}/lib NO_DEFAULT_PATH)
+if(NOT Z_LIBRARY)
+    find_library(Z_LIBRARY z)
+endif()
+message(STATUS "zlib: ${Z_LIBRARY}")
+
+find_library(GIF_LIBRARY NAMES libgif.a gif
+    PATHS ${DEPS_PREFIX}/lib NO_DEFAULT_PATH)
+find_path(GIF_INCLUDE_DIR gif_lib.h
+    PATHS ${DEPS_PREFIX}/include NO_DEFAULT_PATH)
+if(NOT GIF_LIBRARY)
+    find_library(GIF_LIBRARY gif PATHS /opt/homebrew/lib)
+    find_path(GIF_INCLUDE_DIR gif_lib.h PATHS /opt/homebrew/include)
+endif()
+message(STATUS "giflib: ${GIF_LIBRARY}")
 
 # ---------- libmodernimage sources ----------
 
@@ -27,7 +68,6 @@ set(MODERNIMAGE_SOURCES
     src/bridge_cwebp.c
     src/bridge_gif2webp.c
     src/bridge_avifenc.c
-    # gifdec.c is not part of any libwebp static lib - compile it directly
     ${WEBP_DIR}/examples/gifdec.c
 )
 
@@ -36,25 +76,22 @@ set(MODERNIMAGE_SOURCES
 set(MODERNIMAGE_INCLUDE_DIRS
     ${CMAKE_SOURCE_DIR}/include
     ${CMAKE_SOURCE_DIR}/src
-    # libwebp headers
     ${WEBP_DIR}
     ${WEBP_DIR}/src
     ${WEBP_DIR}/examples
     ${WEBP_DIR}/imageio
-    # libavif headers
     ${AVIF_DIR}/include
     ${AVIF_DIR}/apps/shared
     ${AVIF_DIR}/third_party/iccjpeg
-    # System
-    ${PNG_INCLUDE_DIRS}
+    ${PNG_INCLUDE_DIR}
     ${JPEG_INCLUDE_DIR}
     ${GIF_INCLUDE_DIR}
+    ${DEPS_PREFIX}/include
 )
 
 # ---------- Static libraries to link ----------
 
-# Order matters on Linux (ld processes left-to-right):
-# libraries that USE symbols must come before libraries that DEFINE them
+# Order: consumers before providers (Linux ld is order-sensitive)
 set(WEBP_LIBS
     ${WEBP_BUILD}/libimagedec.a
     ${WEBP_BUILD}/libimageenc.a
@@ -67,14 +104,21 @@ set(WEBP_LIBS
     ${WEBP_BUILD}/libsharpyuv.a
 )
 
-# avif_apps uses avif_internal, avif_internal uses aom
 set(AVIF_LIBS
     ${AVIF_BUILD}/libavif_apps.a
     ${AVIF_BUILD}/libavif_internal.a
     ${AOM_BUILD}/libaom.a
 )
 
-# ---------- Thin static library (our objects only) ----------
+# Image format libs (self-built or system)
+set(IMAGE_LIBS
+    ${PNG_LIBRARY}
+    ${JPEG_LIBRARY}
+    ${GIF_LIBRARY}
+    ${Z_LIBRARY}
+)
+
+# ---------- Thin static library ----------
 
 add_library(modernimage_objs STATIC ${MODERNIMAGE_SOURCES})
 target_include_directories(modernimage_objs PUBLIC
@@ -85,7 +129,6 @@ target_compile_definitions(modernimage_objs PRIVATE WEBP_HAVE_GIF WEBP_HAVE_PNG 
 set_target_properties(modernimage_objs PROPERTIES OUTPUT_NAME modernimage_objs)
 
 # ---------- Fat static library via cmake --install ----------
-# Uses install(CODE) to combine archives at install time (reliable across platforms)
 
 set(FAT_STATIC_LIB ${CMAKE_BINARY_DIR}/libmodernimage.a)
 
@@ -94,17 +137,22 @@ install(CODE "
 
     set(LIBS_TO_COMBINE
         \"${CMAKE_BINARY_DIR}/libmodernimage_objs.a\"
-        \"${WEBP_BUILD}/libwebp.a\"
-        \"${WEBP_BUILD}/libwebpmux.a\"
-        \"${WEBP_BUILD}/libwebpdemux.a\"
-        \"${WEBP_BUILD}/libsharpyuv.a\"
         \"${WEBP_BUILD}/libimagedec.a\"
         \"${WEBP_BUILD}/libimageenc.a\"
         \"${WEBP_BUILD}/libimageioutil.a\"
         \"${WEBP_BUILD}/libexampleutil.a\"
-        \"${AVIF_BUILD}/libavif_internal.a\"
+        \"${WEBP_BUILD}/libwebpmux.a\"
+        \"${WEBP_BUILD}/libwebpdemux.a\"
+        \"${WEBP_BUILD}/libwebp.a\"
+        \"${WEBP_BUILD}/libwebpdecoder.a\"
+        \"${WEBP_BUILD}/libsharpyuv.a\"
         \"${AVIF_BUILD}/libavif_apps.a\"
+        \"${AVIF_BUILD}/libavif_internal.a\"
         \"${AOM_BUILD}/libaom.a\"
+        \"${PNG_LIBRARY}\"
+        \"${JPEG_LIBRARY}\"
+        \"${GIF_LIBRARY}\"
+        \"${Z_LIBRARY}\"
     )
 
     if(APPLE)
@@ -140,45 +188,48 @@ target_include_directories(modernimage_shared PUBLIC
 target_compile_definitions(modernimage_shared PRIVATE WEBP_HAVE_GIF WEBP_HAVE_PNG WEBP_HAVE_JPEG)
 set_target_properties(modernimage_shared PROPERTIES OUTPUT_NAME modernimage)
 
+# Shared lib embeds all deps statically
 target_link_libraries(modernimage_shared PRIVATE
     ${WEBP_LIBS}
     ${AVIF_LIBS}
-    ${PNG_LIBRARIES}
-    ${JPEG_LIBRARIES}
-    ${GIF_LIBRARY}
+    ${IMAGE_LIBS}
     Threads::Threads
 )
-# -lm is not available on Windows
 if(NOT WIN32)
     target_link_libraries(modernimage_shared PRIVATE m)
+endif()
+if(UNIX AND NOT APPLE)
+    target_link_options(modernimage_shared PRIVATE
+        -Wl,--exclude-libs,ALL
+        -static-libgcc
+    )
+elseif(MINGW)
+    target_link_options(modernimage_shared PRIVATE -static-libgcc)
 endif()
 
 # ---------- Tests ----------
 
-set(SYSTEM_LIBS
-    ${PNG_LIBRARIES}
-    ${JPEG_LIBRARIES}
-    ${GIF_LIBRARY}
-    Threads::Threads
-)
-if(NOT WIN32)
-    list(APPEND SYSTEM_LIBS m)
-endif()
-
-# Tests link against the thin .a + dep .a directly (fat .a is created at install time)
+# Full link order: our code → tool libs → codec → image format libs → system
 set(ALL_STATIC_LIBS
     modernimage_objs
     ${WEBP_LIBS}
     ${AVIF_LIBS}
+    ${IMAGE_LIBS}
+    ${WEBP_LIBS}
+    ${IMAGE_LIBS}
+    Threads::Threads
 )
+if(NOT WIN32)
+    list(APPEND ALL_STATIC_LIBS m)
+endif()
 
 add_executable(test_binary_equiv tests/test_binary_equiv.c)
 target_include_directories(test_binary_equiv PRIVATE ${CMAKE_SOURCE_DIR}/include)
-target_link_libraries(test_binary_equiv PRIVATE ${ALL_STATIC_LIBS} ${SYSTEM_LIBS})
+target_link_libraries(test_binary_equiv PRIVATE ${ALL_STATIC_LIBS})
 
 add_executable(test_thread_safety tests/test_thread_safety.c)
 target_include_directories(test_thread_safety PRIVATE ${CMAKE_SOURCE_DIR}/include)
-target_link_libraries(test_thread_safety PRIVATE ${ALL_STATIC_LIBS} ${SYSTEM_LIBS})
+target_link_libraries(test_thread_safety PRIVATE ${ALL_STATIC_LIBS})
 
 enable_testing()
 add_test(NAME binary_equiv COMMAND test_binary_equiv)
