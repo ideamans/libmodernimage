@@ -70,7 +70,8 @@ cmake -G Ninja -S "$LIBJPEG_DIR" -B "$LIBJPEG_DIR/build" \
   -DCMAKE_INSTALL_PREFIX="$PREFIX" \
   -DENABLE_SHARED=OFF \
   -DENABLE_STATIC=ON \
-  -DWITH_TURBOJPEG=OFF
+  -DWITH_TURBOJPEG=OFF \
+  -DWITH_JPEG8=ON
 cmake --build "$LIBJPEG_DIR/build" --parallel "$JOBS"
 cmake --install "$LIBJPEG_DIR/build"
 echo "libjpeg-turbo: OK"
