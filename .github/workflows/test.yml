@@ -115,12 +115,13 @@ jobs:
         shell: msys2 {0}
         run: bash scripts/package.sh
 
-      # Cache the packaged archive so release.yml can skip the full rebuild
-      - name: Save build cache
-        uses: actions/cache/save@v4
+      # Upload the final package for release.yml to consume (no intermediate cache)
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
         with:
+          name: build-${{ matrix.platform }}
           path: build/dist/
-          key: build-${{ matrix.platform }}-${{ github.sha }}
+          retention-days: 7
 
       - name: Verify artifacts (Unix)
         if: runner.os != 'Windows'

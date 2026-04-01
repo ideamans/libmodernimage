@@ -32,33 +32,25 @@ jobs:
         with:
           submodules: recursive
 
-      # Try to restore the build cache from test.yml (same commit SHA)
-      - name: Restore build cache
-        id: cache
-        uses: actions/cache/restore@v4
-        with:
-          path: build/dist/
-          key: build-${{ matrix.platform }}-${{ github.sha }}
-
-      # --- Full build (only when cache missed) ---
+      # Always do a full clean build — no caching of intermediate objects.
 
       - name: Install dependencies (Linux)
-        if: steps.cache.outputs.cache-hit != 'true' && runner.os == 'Linux'
+        if: runner.os == 'Linux'
         run: |
           sudo apt-get update
           sudo apt-get install -y cmake ninja-build nasm
 
       - name: Install dependencies (macOS)
-        if: steps.cache.outputs.cache-hit != 'true' && runner.os == 'macOS'
+        if: runner.os == 'macOS'
         run: |
           brew install cmake ninja nasm
 
       - name: Setup NASM (Windows)
-        if: steps.cache.outputs.cache-hit != 'true' && runner.os == 'Windows'
+        if: runner.os == 'Windows'
         uses: ilammy/setup-nasm@v1
 
       - name: Setup MSYS2 (Windows)
-        if: steps.cache.outputs.cache-hit != 'true' && runner.os == 'Windows'
+        if: runner.os == 'Windows'
         uses: msys2/setup-msys2@v2
         with:
           msystem: UCRT64
@@ -73,55 +65,53 @@ jobs:
             tar
 
       - name: Build deps (Unix)
-        if: steps.cache.outputs.cache-hit != 'true' && runner.os != 'Windows'
+        if: runner.os != 'Windows'
         run: bash scripts/build-deps.sh
 
       - name: Build deps (Windows)
-        if: steps.cache.outputs.cache-hit != 'true' && runner.os == 'Windows'
+        if: runner.os == 'Windows'
         shell: msys2 {0}
         run: bash scripts/build-deps.sh
 
       - name: Build libmodernimage (Unix)
-        if: steps.cache.outputs.cache-hit != 'true' && runner.os != 'Windows'
+        if: runner.os != 'Windows'
         run: bash scripts/build.sh
 
       - name: Build libmodernimage (Windows)
-        if: steps.cache.outputs.cache-hit != 'true' && runner.os == 'Windows'
+        if: runner.os == 'Windows'
         shell: msys2 {0}
         run: bash scripts/build.sh
 
       - name: Run tests (Unix)
-        if: steps.cache.outputs.cache-hit != 'true' && runner.os != 'Windows'
+        if: runner.os != 'Windows'
         run: |
           ./build/test_binary_equiv
           ./build/test_thread_safety
 
       - name: Run tests (Windows)
-        if: steps.cache.outputs.cache-hit != 'true' && runner.os == 'Windows'
+        if: runner.os == 'Windows'
         shell: msys2 {0}
         run: |
           ./build/test_binary_equiv
           ./build/test_thread_safety
 
       - name: Generate cli-compat.json (Unix)
-        if: steps.cache.outputs.cache-hit != 'true' && runner.os != 'Windows'
+        if: runner.os != 'Windows'
         run: bash scripts/generate-cli-compat.sh
 
       - name: Generate cli-compat.json (Windows)
-        if: steps.cache.outputs.cache-hit != 'true' && runner.os == 'Windows'
+        if: runner.os == 'Windows'
         shell: msys2 {0}
         run: bash scripts/generate-cli-compat.sh
 
       - name: Package (Unix)
-        if: steps.cache.outputs.cache-hit != 'true' && runner.os != 'Windows'
+        if: runner.os != 'Windows'
         run: bash scripts/package.sh
 
       - name: Package (Windows)
-        if: steps.cache.outputs.cache-hit != 'true' && runner.os == 'Windows'
+        if: runner.os == 'Windows'
         shell: msys2 {0}
         run: bash scripts/package.sh
-
-      # --- Upload (always) ---
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
