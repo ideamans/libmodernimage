@@ -155,13 +155,15 @@ install(CODE "
         \"${Z_LIBRARY}\"
     )
 
+    # Step 1: Combine all static libraries into a raw fat archive
+    set(RAW_FAT_LIB \"${CMAKE_BINARY_DIR}/libmodernimage_raw.a\")
     if(APPLE)
         execute_process(
-            COMMAND libtool -static -o \"${FAT_STATIC_LIB}\" \${LIBS_TO_COMBINE}
+            COMMAND libtool -static -o \"\${RAW_FAT_LIB}\" \${LIBS_TO_COMBINE}
         )
     else()
         set(MRI_SCRIPT \"${CMAKE_BINARY_DIR}/combine.mri\")
-        file(WRITE \"\${MRI_SCRIPT}\" \"CREATE ${FAT_STATIC_LIB}\\n\")
+        file(WRITE \"\${MRI_SCRIPT}\" \"CREATE \${RAW_FAT_LIB}\\n\")
         foreach(LIB \${LIBS_TO_COMBINE})
             file(APPEND \"\${MRI_SCRIPT}\" \"ADDLIB \${LIB}\\n\")
         endforeach()
@@ -170,12 +172,19 @@ install(CODE "
             COMMAND ar -M
             INPUT_FILE \"\${MRI_SCRIPT}\"
         )
-        execute_process(
-            COMMAND ranlib \"${FAT_STATIC_LIB}\"
-        )
+        execute_process(COMMAND ranlib \"\${RAW_FAT_LIB}\")
     endif()
 
-    message(STATUS \"Created: ${FAT_STATIC_LIB}\")
+    # Step 2: Localize all symbols except modernimage_* public API.
+    # Uses -all_load to force inclusion of all objects (avoids ar x duplicate name issue).
+    message(STATUS \"Localizing internal symbols...\")
+    execute_process(
+        COMMAND bash \"${CMAKE_SOURCE_DIR}/scripts/localize-symbols.sh\"
+            \"\${RAW_FAT_LIB}\" \"${FAT_STATIC_LIB}\"
+    )
+    file(REMOVE \"\${RAW_FAT_LIB}\")
+
+    message(STATUS \"Created: ${FAT_STATIC_LIB} (symbols localized)\")
 ")
 
 # ---------- Shared library ----------
