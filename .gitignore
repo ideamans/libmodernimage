@@ -9,6 +9,7 @@
 /deps/zlib/
 /deps/libpng/
 /deps/libjpeg-turbo/
+/deps/libjpeg/
 /deps/giflib/
 
 # Editor / IDE

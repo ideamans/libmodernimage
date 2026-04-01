@@ -57,23 +57,28 @@ cmake --build "$LIBPNG_DIR/build" --parallel "$JOBS"
 cmake --install "$LIBPNG_DIR/build"
 echo "libpng: OK"
 
-# ---------- libjpeg-turbo ----------
+# ---------- libjpeg (IJG) ----------
 echo ""
-echo "--- libjpeg-turbo ---"
-LIBJPEG_DIR="$DEPS_DIR/libjpeg-turbo"
-if [ ! -d "$LIBJPEG_DIR/.git" ] && [ ! -f "$LIBJPEG_DIR/CMakeLists.txt" ]; then
-  git clone --depth 1 -b 3.1.0 https://github.com/libjpeg-turbo/libjpeg-turbo.git "$LIBJPEG_DIR"
+echo "--- libjpeg (IJG) ---"
+LIBJPEG_DIR="$DEPS_DIR/libjpeg"
+if [ ! -d "$LIBJPEG_DIR" ] || [ ! -f "$LIBJPEG_DIR/jpeglib.h" ]; then
+  JPEG_VER="9f"
+  echo "Downloading IJG libjpeg $JPEG_VER ..."
+  curl -fsSL -o "$DEPS_DIR/jpegsrc.tar.gz" \
+    "https://ijg.org/files/jpegsrc.v${JPEG_VER}.tar.gz"
+  tar -xzf "$DEPS_DIR/jpegsrc.tar.gz" -C "$DEPS_DIR"
+  mv "$DEPS_DIR/jpeg-${JPEG_VER}" "$LIBJPEG_DIR" 2>/dev/null || true
+  rm -f "$DEPS_DIR/jpegsrc.tar.gz"
 fi
-cmake -G Ninja -S "$LIBJPEG_DIR" -B "$LIBJPEG_DIR/build" \
-  -DCMAKE_BUILD_TYPE=Release \
-  -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
-  -DCMAKE_INSTALL_PREFIX="$PREFIX" \
-  -DENABLE_SHARED=OFF \
-  -DENABLE_STATIC=ON \
-  -DWITH_TURBOJPEG=OFF
-cmake --build "$LIBJPEG_DIR/build" --parallel "$JOBS"
-cmake --install "$LIBJPEG_DIR/build"
-echo "libjpeg-turbo: OK"
+(
+  cd "$LIBJPEG_DIR"
+  if [ ! -f Makefile ]; then
+    ./configure --prefix="$PREFIX" --enable-static --disable-shared --with-pic CFLAGS="-O2 -fPIC"
+  fi
+  make -j"$JOBS"
+  make install
+)
+echo "libjpeg (IJG): OK"
 
 # ---------- giflib ----------
 echo ""
