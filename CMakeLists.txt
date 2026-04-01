@@ -181,7 +181,11 @@ install(CODE "
     execute_process(
         COMMAND bash \"${CMAKE_SOURCE_DIR}/scripts/localize-symbols.sh\"
             \"\${RAW_FAT_LIB}\" \"${FAT_STATIC_LIB}\"
+        RESULT_VARIABLE LOCALIZE_RESULT
     )
+    if(NOT LOCALIZE_RESULT EQUAL 0)
+        message(FATAL_ERROR \"localize-symbols.sh failed with exit code \${LOCALIZE_RESULT}\")
+    endif()
     file(REMOVE \"\${RAW_FAT_LIB}\")
 
     message(STATUS \"Created: ${FAT_STATIC_LIB} (symbols localized)\")

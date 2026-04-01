@@ -25,20 +25,16 @@ if [ "$(uname -s)" = "Darwin" ]; then
     -exported_symbols_list "$WORK_DIR/exports.txt" \
     "$INPUT_A" \
     -o "$WORK_DIR/combined.o"
-else
-  # Linux: ld -r then objcopy
-  ld -r --whole-archive "$INPUT_A" -o "$WORK_DIR/combined.o" 2>&1 | grep -v "^duplicate" || true
-
-  nm "$WORK_DIR/combined.o" | grep " T " | awk '{print $3}' | \
-    grep -v "^_\?modernimage_" | sed 's/^_//' > "$WORK_DIR/localize.txt"
-
-  objcopy --localize-symbols="$WORK_DIR/localize.txt" "$WORK_DIR/combined.o"
-fi
-
-ar rcs "$OUTPUT_A" "$WORK_DIR/combined.o"
-if [ "$(uname -s)" = "Darwin" ]; then
+  ar rcs "$OUTPUT_A" "$WORK_DIR/combined.o"
   ranlib -no_warning_for_no_symbols "$OUTPUT_A"
 else
+  # Linux/Windows: localize symbols directly on the archive via objcopy
+  cp "$INPUT_A" "$OUTPUT_A"
+
+  nm "$OUTPUT_A" | grep " T " | awk '{print $3}' | \
+    grep -v "^_\?modernimage_" > "$WORK_DIR/localize.txt"
+
+  objcopy --localize-symbols="$WORK_DIR/localize.txt" "$OUTPUT_A"
   ranlib "$OUTPUT_A"
 fi
 
