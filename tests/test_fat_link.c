@@ -55,7 +55,7 @@ int main(void) {
     printf("  version: %s\n", ver);
 
     /* 2. Context lifecycle */
-    ModernImageContext* ctx = modernimage_context_new();
+    modernimage_context_t* ctx = modernimage_context_new();
     ASSERT(ctx != NULL, "modernimage_context_new() succeeds");
     if (!ctx) {
         fprintf(stderr, "Cannot continue without context\n");
@@ -68,10 +68,10 @@ int main(void) {
         unsigned char* jpeg = read_file("tests/fixtures/photo.jpg", &jpeg_len);
         ASSERT(jpeg != NULL, "load tests/fixtures/photo.jpg");
         if (jpeg) {
-            ModernImageContext* c = modernimage_context_new();
+            modernimage_context_t* c = modernimage_context_new();
             modernimage_set_stdin(c, jpeg, jpeg_len);
             const char* argv[] = {"cwebp", "-q", "80", "-o", "/tmp/fat_link_test.webp", "--", "-"};
-            int rc = modernimage_cwebp(c, 7, (char**)argv);
+            int rc = modernimage_cwebp(c, 7, argv);
             ASSERT(rc == 0, "cwebp encodes JPEG to WebP via fat .a");
             MI_UNLINK("/tmp/fat_link_test.webp");
             modernimage_context_free(c);
@@ -85,11 +85,11 @@ int main(void) {
         unsigned char* jpeg = read_file("tests/fixtures/photo.jpg", &jpeg_len);
         ASSERT(jpeg != NULL, "load tests/fixtures/photo.jpg for avifenc");
         if (jpeg) {
-            ModernImageContext* c = modernimage_context_new();
+            modernimage_context_t* c = modernimage_context_new();
             modernimage_set_stdin(c, jpeg, jpeg_len);
             const char* argv[] = {"avifenc", "-q", "80", "-s", "9",
                 "--input-format", "jpeg", "-o", "/tmp/fat_link_test.avif", "--stdin"};
-            int rc = modernimage_avifenc(c, 10, (char**)argv);
+            int rc = modernimage_avifenc(c, 10, argv);
             ASSERT(rc == 0, "avifenc encodes JPEG to AVIF via fat .a");
             MI_UNLINK("/tmp/fat_link_test.avif");
             modernimage_context_free(c);
@@ -103,10 +103,10 @@ int main(void) {
         unsigned char* gif = read_file("tests/fixtures/animation.gif", &gif_len);
         ASSERT(gif != NULL, "load tests/fixtures/animation.gif");
         if (gif) {
-            ModernImageContext* c = modernimage_context_new();
+            modernimage_context_t* c = modernimage_context_new();
             const char* argv[] = {"gif2webp", "tests/fixtures/animation.gif",
                 "-o", "/tmp/fat_link_test_gif.webp"};
-            int rc = modernimage_gif2webp(c, 4, (char**)argv);
+            int rc = modernimage_gif2webp(c, 4, argv);
             ASSERT(rc == 0, "gif2webp encodes GIF to WebP via fat .a");
             MI_UNLINK("/tmp/fat_link_test_gif.webp");
             modernimage_context_free(c);
