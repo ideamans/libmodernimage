@@ -35,7 +35,9 @@ else
     grep "^modernimage_" | sort -u > "$WORK_DIR/keep-global.txt"
 
   # Merge all objects into a single relocatable .o (resolves internal refs)
-  ld -r --whole-archive "$INPUT_A" -o "$WORK_DIR/combined.o"
+  # --allow-multiple-definition: some deps (e.g. libwebp and libwebpdecoder)
+  # share object files; first definition wins, matching macOS libtool behavior.
+  ld -r --whole-archive --allow-multiple-definition "$INPUT_A" -o "$WORK_DIR/combined.o"
 
   # Localize everything except modernimage_* public API
   nm "$WORK_DIR/combined.o" | grep " T " | awk '{print $3}' | \
