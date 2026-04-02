@@ -247,3 +247,42 @@ target_link_libraries(test_thread_safety PRIVATE ${ALL_STATIC_LIBS})
 enable_testing()
 add_test(NAME binary_equiv COMMAND test_binary_equiv)
 add_test(NAME thread_safety COMMAND test_thread_safety)
+
+# ---------- Fat static library link test ----------
+# This test links ONLY against the installed fat libmodernimage.a (not individual deps).
+# It catches symbol resolution issues that only appear for downstream consumers.
+# Built as a custom command after cmake --install creates the fat .a.
+
+set(FAT_LINK_TEST_SRC ${CMAKE_SOURCE_DIR}/tests/test_fat_link.c)
+set(FAT_LINK_TEST_BIN ${CMAKE_BINARY_DIR}/test_fat_link)
+
+set(FAT_LINK_SYSTEM_LIBS "")
+if(APPLE)
+    set(FAT_LINK_SYSTEM_LIBS "-lc++ -lpthread -lm")
+elseif(MINGW)
+    set(FAT_LINK_SYSTEM_LIBS "-lstdc++ -lws2_32")
+else()
+    set(FAT_LINK_SYSTEM_LIBS "-lstdc++ -lpthread -lm")
+endif()
+
+install(CODE "
+    message(STATUS \"Building fat link test...\")
+    execute_process(
+        COMMAND ${CMAKE_C_COMPILER}
+            -o \"${FAT_LINK_TEST_BIN}\"
+            \"${FAT_LINK_TEST_SRC}\"
+            -I\"${CMAKE_SOURCE_DIR}/include\"
+            \"${FAT_STATIC_LIB}\"
+            ${FAT_LINK_SYSTEM_LIBS}
+        RESULT_VARIABLE FAT_LINK_RESULT
+        OUTPUT_VARIABLE FAT_LINK_OUTPUT
+        ERROR_VARIABLE FAT_LINK_ERROR
+    )
+    if(NOT FAT_LINK_RESULT EQUAL 0)
+        message(FATAL_ERROR
+            \"Fat link test FAILED to compile/link.\\n\"
+            \"This means the fat libmodernimage.a has unresolved internal symbols.\\n\"
+            \"Error:\\n\${FAT_LINK_ERROR}\")
+    endif()
+    message(STATUS \"Fat link test built successfully: ${FAT_LINK_TEST_BIN}\")
+")

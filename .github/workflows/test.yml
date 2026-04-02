@@ -2,26 +2,33 @@ name: Test
 
 on:
   push:
-    branches: [develop, main]
+    branches: [develop, main, linux]
   pull_request:
     branches: [develop, main]
   workflow_dispatch:
 
 jobs:
+  setup:
+    name: Setup matrix
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.set-matrix.outputs.matrix }}
+    steps:
+      - id: set-matrix
+        run: |
+          if [[ "${{ github.ref_name }}" == "linux" ]]; then
+            echo 'matrix=[{"os":"ubuntu-latest","platform":"linux-x86_64"}]' >> "$GITHUB_OUTPUT"
+          else
+            echo 'matrix=[{"os":"ubuntu-latest","platform":"linux-x86_64"},{"os":"ubuntu-24.04-arm","platform":"linux-aarch64"},{"os":"macos-latest","platform":"darwin-arm64"},{"os":"windows-latest","platform":"windows-x86_64"}]' >> "$GITHUB_OUTPUT"
+          fi
+
   test:
     name: Test (${{ matrix.platform }})
+    needs: setup
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - os: ubuntu-latest
-            platform: linux-x86_64
-          - os: ubuntu-24.04-arm
-            platform: linux-aarch64
-          - os: macos-latest
-            platform: darwin-arm64
-          - os: windows-latest
-            platform: windows-x86_64
+        include: ${{ fromJson(needs.setup.outputs.matrix) }}
 
     runs-on: ${{ matrix.os }}
 
@@ -96,6 +103,15 @@ jobs:
         if: runner.os == 'Windows'
         shell: msys2 {0}
         run: ./build/test_thread_safety
+
+      - name: Run fat link test (Unix)
+        if: runner.os != 'Windows'
+        run: ./build/test_fat_link
+
+      - name: Run fat link test (Windows)
+        if: runner.os == 'Windows'
+        shell: msys2 {0}
+        run: ./build/test_fat_link
 
       - name: Generate cli-compat.json (Unix)
         if: runner.os != 'Windows'
