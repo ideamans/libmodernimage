@@ -268,12 +268,7 @@ endif()
 install(CODE "
     message(STATUS \"Building fat link test...\")
     execute_process(
-        COMMAND ${CMAKE_C_COMPILER}
-            -o \"${FAT_LINK_TEST_BIN}\"
-            \"${FAT_LINK_TEST_SRC}\"
-            -I\"${CMAKE_SOURCE_DIR}/include\"
-            \"${FAT_STATIC_LIB}\"
-            ${FAT_LINK_SYSTEM_LIBS}
+        COMMAND bash -c \"${CMAKE_C_COMPILER} -o '${FAT_LINK_TEST_BIN}' '${FAT_LINK_TEST_SRC}' -I'${CMAKE_SOURCE_DIR}/include' '${FAT_STATIC_LIB}' ${FAT_LINK_SYSTEM_LIBS}\"
         RESULT_VARIABLE FAT_LINK_RESULT
         OUTPUT_VARIABLE FAT_LINK_OUTPUT
         ERROR_VARIABLE FAT_LINK_ERROR
