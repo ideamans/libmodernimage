@@ -2,7 +2,7 @@
 # Localize all symbols in a fat .a except modernimage_* public API.
 # Usage: localize-symbols.sh <input.a> <output.a> [arch]
 
-set -euo pipefail
+set -euxo pipefail
 
 INPUT_A="$1"
 OUTPUT_A="$2"
