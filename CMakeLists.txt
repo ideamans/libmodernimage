@@ -182,15 +182,7 @@ install(CODE "
         COMMAND bash \"${CMAKE_SOURCE_DIR}/scripts/localize-symbols.sh\"
             \"\${RAW_FAT_LIB}\" \"${FAT_STATIC_LIB}\"
         RESULT_VARIABLE LOCALIZE_RESULT
-        OUTPUT_VARIABLE LOCALIZE_OUTPUT
-        ERROR_VARIABLE LOCALIZE_ERROR
     )
-    if(LOCALIZE_OUTPUT)
-        message(STATUS \"localize-symbols.sh stdout: \${LOCALIZE_OUTPUT}\")
-    endif()
-    if(LOCALIZE_ERROR)
-        message(STATUS \"localize-symbols.sh stderr: \${LOCALIZE_ERROR}\")
-    endif()
     if(NOT LOCALIZE_RESULT EQUAL 0)
         message(FATAL_ERROR \"localize-symbols.sh failed with exit code \${LOCALIZE_RESULT}\")
     endif()
