@@ -62,61 +62,55 @@ int main(void) {
     ASSERT(ctx != NULL, "modernimage_context_new() succeeds");
     modernimage_context_free(ctx);
 
-    /* 3. cwebp (exercises libwebp symbols) - optional, needs fixtures */
+    /* 3. cwebp (exercises libwebp symbols) */
     {
-        size_t jpeg_len;
-        unsigned char* jpeg = read_file("tests/fixtures/photo.jpg", &jpeg_len);
-        if (jpeg) {
+        size_t png_len;
+        unsigned char* png = read_file("tests/fixtures/test_red_64x64.png", &png_len);
+        ASSERT(png != NULL, "load test_red_64x64.png");
+        if (png) {
             modernimage_context_t* c = modernimage_context_new();
-            modernimage_set_stdin(c, jpeg, jpeg_len);
+            modernimage_set_stdin(c, png, png_len);
             const char* argv[] = {"cwebp", "-q", "80", "-o", "/tmp/fat_link_test.webp", "--", "-"};
             int rc = modernimage_cwebp(c, 7, argv);
-            ASSERT(rc == 0, "cwebp encodes JPEG to WebP via fat .a");
+            ASSERT(rc == 0, "cwebp encodes PNG to WebP via fat .a");
             MI_UNLINK("/tmp/fat_link_test.webp");
             modernimage_context_free(c);
-            free(jpeg);
-        } else {
-            printf("SKIP: cwebp test (tests/fixtures/photo.jpg not found)\n");
-            g_skip++;
+            free(png);
         }
     }
 
     /* 4. avifenc (exercises libavif + libaom symbols - the regression case) */
     {
-        size_t jpeg_len;
-        unsigned char* jpeg = read_file("tests/fixtures/photo.jpg", &jpeg_len);
-        if (jpeg) {
+        size_t png_len;
+        unsigned char* png = read_file("tests/fixtures/test_red_64x64.png", &png_len);
+        ASSERT(png != NULL, "load test_red_64x64.png for avifenc");
+        if (png) {
             modernimage_context_t* c = modernimage_context_new();
-            modernimage_set_stdin(c, jpeg, jpeg_len);
+            modernimage_set_stdin(c, png, png_len);
             const char* argv[] = {"avifenc", "-q", "80", "-s", "9",
-                "--input-format", "jpeg", "-o", "/tmp/fat_link_test.avif", "--stdin"};
+                "--input-format", "png", "-o", "/tmp/fat_link_test.avif", "--stdin"};
             int rc = modernimage_avifenc(c, 10, argv);
-            ASSERT(rc == 0, "avifenc encodes JPEG to AVIF via fat .a");
+            ASSERT(rc == 0, "avifenc encodes PNG to AVIF via fat .a");
             MI_UNLINK("/tmp/fat_link_test.avif");
             modernimage_context_free(c);
-            free(jpeg);
-        } else {
-            printf("SKIP: avifenc test (tests/fixtures/photo.jpg not found)\n");
-            g_skip++;
+            free(png);
         }
     }
 
     /* 5. gif2webp (exercises giflib symbols) */
     {
         size_t gif_len;
-        unsigned char* gif = read_file("tests/fixtures/animation.gif", &gif_len);
+        unsigned char* gif = read_file("tests/fixtures/test_anim.gif", &gif_len);
+        ASSERT(gif != NULL, "load test_anim.gif");
         if (gif) {
             modernimage_context_t* c = modernimage_context_new();
-            const char* argv[] = {"gif2webp", "tests/fixtures/animation.gif",
+            const char* argv[] = {"gif2webp", "tests/fixtures/test_anim.gif",
                 "-o", "/tmp/fat_link_test_gif.webp"};
             int rc = modernimage_gif2webp(c, 4, argv);
             ASSERT(rc == 0, "gif2webp encodes GIF to WebP via fat .a");
             MI_UNLINK("/tmp/fat_link_test_gif.webp");
             modernimage_context_free(c);
             free(gif);
-        } else {
-            printf("SKIP: gif2webp test (tests/fixtures/animation.gif not found)\n");
-            g_skip++;
         }
     }
 
