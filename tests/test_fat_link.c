@@ -18,10 +18,13 @@
 
 #ifdef _WIN32
 #include <io.h>
+#include <direct.h>
 #define MI_UNLINK(p) _unlink(p)
+#define TMP_DIR "fat_link_tmp"
 #else
 #include <unistd.h>
 #define MI_UNLINK(p) unlink(p)
+#define TMP_DIR "/tmp"
 #endif
 
 static int g_pass = 0, g_fail = 0, g_skip = 0;
@@ -52,6 +55,10 @@ static unsigned char* read_file(const char* path, size_t* out_len) {
 int main(void) {
     printf("=== Fat static library link test ===\n\n");
 
+#ifdef _WIN32
+    _mkdir(TMP_DIR);
+#endif
+
     /* 1. Version check (basic API access) */
     const char* ver = modernimage_version();
     ASSERT(ver != NULL && strlen(ver) > 0, "modernimage_version() returns non-empty string");
@@ -70,10 +77,10 @@ int main(void) {
         if (png) {
             modernimage_context_t* c = modernimage_context_new();
             modernimage_set_stdin(c, png, png_len);
-            const char* argv[] = {"cwebp", "-q", "80", "-o", "/tmp/fat_link_test.webp", "--", "-"};
+            const char* argv[] = {"cwebp", "-q", "80", "-o", TMP_DIR "/fat_link_test.webp", "--", "-"};
             int rc = modernimage_cwebp(c, 7, argv);
             ASSERT(rc == 0, "cwebp encodes PNG to WebP via fat .a");
-            MI_UNLINK("/tmp/fat_link_test.webp");
+            MI_UNLINK(TMP_DIR "/fat_link_test.webp");
             modernimage_context_free(c);
             free(png);
         }
@@ -88,10 +95,10 @@ int main(void) {
             modernimage_context_t* c = modernimage_context_new();
             modernimage_set_stdin(c, png, png_len);
             const char* argv[] = {"avifenc", "-q", "80", "-s", "9",
-                "--input-format", "png", "-o", "/tmp/fat_link_test.avif", "--stdin"};
+                "--input-format", "png", "-o", TMP_DIR "/fat_link_test.avif", "--stdin"};
             int rc = modernimage_avifenc(c, 10, argv);
             ASSERT(rc == 0, "avifenc encodes PNG to AVIF via fat .a");
-            MI_UNLINK("/tmp/fat_link_test.avif");
+            MI_UNLINK(TMP_DIR "/fat_link_test.avif");
             modernimage_context_free(c);
             free(png);
         }
@@ -105,10 +112,10 @@ int main(void) {
         if (gif) {
             modernimage_context_t* c = modernimage_context_new();
             const char* argv[] = {"gif2webp", "tests/fixtures/test_anim.gif",
-                "-o", "/tmp/fat_link_test_gif.webp"};
+                "-o", TMP_DIR "/fat_link_test_gif.webp"};
             int rc = modernimage_gif2webp(c, 4, argv);
             ASSERT(rc == 0, "gif2webp encodes GIF to WebP via fat .a");
-            MI_UNLINK("/tmp/fat_link_test_gif.webp");
+            MI_UNLINK(TMP_DIR "/fat_link_test_gif.webp");
             modernimage_context_free(c);
             free(gif);
         }
