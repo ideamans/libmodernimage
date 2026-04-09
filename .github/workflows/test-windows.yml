@@ -49,6 +49,14 @@ jobs:
         shell: msys2 {0}
         run: ./build/test_thread_safety.exe
 
+      - name: Run pipe drain tests
+        shell: msys2 {0}
+        run: ./build/test_pipe_drain.exe
+
+      - name: Run JPEG orientation tests
+        shell: msys2 {0}
+        run: ./build/test_jpeg_orientation.exe
+
       - name: Dump build logs (on failure)
         if: failure()
         shell: msys2 {0}
