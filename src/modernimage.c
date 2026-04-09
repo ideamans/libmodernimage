@@ -55,7 +55,7 @@
 #define MI_USE_THREADED_DRAIN 1
 #endif
 
-#define MODERNIMAGE_VERSION "0.2.0"
+#define MODERNIMAGE_VERSION "0.3.1"
 
 /* ========== mi_buffer_t ========== */
 
