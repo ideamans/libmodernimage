@@ -40,6 +40,7 @@ struct modernimage_context {
 int modernimage_cwebp_main(int argc, const char* argv[]);
 int modernimage_gif2webp_main(int argc, const char* argv[]);
 int modernimage_avifenc_main(int argc, char* argv[]);
+int modernimage_jpegtran_main(int argc, char** argv);
 
 #ifdef __cplusplus
 }

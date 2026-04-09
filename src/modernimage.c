@@ -337,6 +337,10 @@ int modernimage_avifenc(modernimage_context_t* ctx, int argc, const char* argv[]
     return mi_run_tool_avif(ctx, modernimage_avifenc_main, argc, argv);
 }
 
+int modernimage_jpegtran(modernimage_context_t* ctx, int argc, const char* argv[]) {
+    return mi_run_tool_avif(ctx, modernimage_jpegtran_main, argc, argv);
+}
+
 /* ========== Output access ========== */
 
 size_t modernimage_get_stdout_size(const modernimage_context_t* ctx) {

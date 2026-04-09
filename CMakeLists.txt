@@ -11,6 +11,8 @@ set(WEBP_BUILD ${WEBP_DIR}/build)
 set(AVIF_DIR ${CMAKE_SOURCE_DIR}/deps/libavif)
 set(AVIF_BUILD ${AVIF_DIR}/build)
 set(AOM_BUILD ${AVIF_DIR}/ext/aom/build.libavif)
+set(JPEG_DIR ${CMAKE_SOURCE_DIR}/deps/libjpeg-turbo)
+set(JPEG_BUILD ${JPEG_DIR}/build)
 
 # Self-built deps prefix (from scripts/build-deps.sh)
 set(DEPS_PREFIX ${CMAKE_SOURCE_DIR}/deps-build)
@@ -65,10 +67,15 @@ message(STATUS "giflib: ${GIF_LIBRARY}")
 
 set(MODERNIMAGE_SOURCES
     src/modernimage.c
+    src/jpeg_orientation.c
     src/bridge_cwebp.c
     src/bridge_gif2webp.c
     src/bridge_avifenc.c
+    src/bridge_jpegtran.c
     ${WEBP_DIR}/examples/gifdec.c
+    ${JPEG_DIR}/src/cdjpeg.c
+    ${JPEG_DIR}/src/rdswitch.c
+    ${JPEG_DIR}/src/transupp.c
 )
 
 # ---------- Include directories ----------
@@ -83,6 +90,8 @@ set(MODERNIMAGE_INCLUDE_DIRS
     ${AVIF_DIR}/include
     ${AVIF_DIR}/apps/shared
     ${AVIF_DIR}/third_party/iccjpeg
+    ${JPEG_DIR}/src
+    ${JPEG_BUILD}
     ${PNG_INCLUDE_DIR}
     ${JPEG_INCLUDE_DIR}
     ${GIF_INCLUDE_DIR}
@@ -125,7 +134,7 @@ target_include_directories(modernimage_objs PUBLIC
     ${CMAKE_SOURCE_DIR}/include
     PRIVATE ${MODERNIMAGE_INCLUDE_DIRS}
 )
-target_compile_definitions(modernimage_objs PRIVATE WEBP_HAVE_GIF WEBP_HAVE_PNG WEBP_HAVE_JPEG)
+target_compile_definitions(modernimage_objs PRIVATE WEBP_HAVE_GIF WEBP_HAVE_PNG WEBP_HAVE_JPEG JPEG_INTERNAL_OPTIONS)
 set_target_properties(modernimage_objs PROPERTIES OUTPUT_NAME modernimage_objs)
 
 # ---------- Fat static library via cmake --install ----------
@@ -198,7 +207,7 @@ target_include_directories(modernimage_shared PUBLIC
     ${CMAKE_SOURCE_DIR}/include
     PRIVATE ${MODERNIMAGE_INCLUDE_DIRS}
 )
-target_compile_definitions(modernimage_shared PRIVATE WEBP_HAVE_GIF WEBP_HAVE_PNG WEBP_HAVE_JPEG)
+target_compile_definitions(modernimage_shared PRIVATE WEBP_HAVE_GIF WEBP_HAVE_PNG WEBP_HAVE_JPEG JPEG_INTERNAL_OPTIONS)
 set_target_properties(modernimage_shared PROPERTIES OUTPUT_NAME modernimage)
 
 # Shared lib embeds all deps statically
