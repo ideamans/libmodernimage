@@ -11,10 +11,17 @@
  *   -flip horizontal|vertical
  *   -transpose
  *   -transverse
- *   -trim
+ *   -trim         (drop partial iMCU edges - lossy in pixel count)
+ *   -perfect      (refuse if the transform would lose any pixels)
  *   -copy none|comments|icc|all
  *   -outfile <path>
  *   [inputfile]  (or stdin if no file specified)
+ *
+ * NOTE: Older versions of this bridge had two bugs that have been fixed:
+ *   1. -perfect was unrecognised, falling through to usage_err.
+ *   2. The cleanup label called jpeg_destroy_* on uninitialised structs
+ *      whenever argument parsing failed before the JPEG objects were
+ *      created, causing SIGABRT for unknown options.
  */
 
 #include <stdio.h>
@@ -51,6 +58,11 @@ int modernimage_jpegtran_main(int argc, char** argv) {
     JCOPY_OPTION copyoption = JCOPYOPT_DEFAULT;
     jpeg_transform_info transformoption;
     int retval = 1;
+    /* Track which JPEG objects we have actually constructed so the cleanup
+     * label can avoid jpeg_destroy_* on uninitialised memory if argument
+     * parsing fails before the create calls. */
+    int srcinfo_inited = 0;
+    int dstinfo_inited = 0;
 
     memset(&transformoption, 0, sizeof(transformoption));
     transformoption.transform = JXFORM_NONE;
@@ -89,6 +101,12 @@ int modernimage_jpegtran_main(int argc, char** argv) {
             transformoption.transform = JXFORM_TRANSVERSE;
         } else if (keymatch_simple(arg, "trim")) {
             transformoption.trim = TRUE;
+        } else if (keymatch_simple(arg, "perfect")) {
+            /* Refuse the transform if it would lose any pixels (i.e. when
+             * the source has partial iMCU rows/columns at the trailing
+             * edges). When TRUE, jtransform_request_workspace returns FALSE
+             * and the bridge prints "transformation is not perfect". */
+            transformoption.perfect = TRUE;
         } else if (keymatch_simple(arg, "copy")) {
             if (++argn >= argc) goto usage_err;
             if (keymatch_simple(argv[argn], "none"))
@@ -112,8 +130,10 @@ int modernimage_jpegtran_main(int argc, char** argv) {
     /* Initialize JPEG objects */
     srcinfo.err = jpeg_std_error(&jsrcerr);
     jpeg_create_decompress(&srcinfo);
+    srcinfo_inited = 1;
     dstinfo.err = jpeg_std_error(&jdsterr);
     jpeg_create_compress(&dstinfo);
+    dstinfo_inited = 1;
 
     /* Open input */
     if (infilename != NULL) {
@@ -202,8 +222,10 @@ usage_err:
     retval = 1;
 
 cleanup:
-    jpeg_destroy_compress(&dstinfo);
-    jpeg_destroy_decompress(&srcinfo);
+    if (dstinfo_inited)
+        jpeg_destroy_compress(&dstinfo);
+    if (srcinfo_inited)
+        jpeg_destroy_decompress(&srcinfo);
     if (input_file != NULL && input_file != stdin)
         fclose(input_file);
     if (output_file != NULL && output_file != stdout)

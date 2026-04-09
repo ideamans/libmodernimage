@@ -82,6 +82,22 @@ void mi_buffer_write(mi_buffer_t* buf, const char* data, size_t len) {
 
 static pthread_mutex_t g_io_mutex = PTHREAD_MUTEX_INITIALIZER;
 
+/* Thread context for stdin writer */
+typedef struct {
+    int          fd;
+    const void*  data;
+    size_t       size;
+} mi_stdin_writer_t;
+
+/* Thread context for stdout/stderr reader. The thread drains the pipe
+ * concurrently with the tool's execution so that tools writing more than
+ * the pipe buffer (~64 KB on Linux/macOS) do not block, which would
+ * deadlock the whole call. */
+typedef struct {
+    int          fd;
+    mi_buffer_t* buf;
+} mi_pipe_reader_t;
+
 typedef struct {
     int saved_stdout;
     int saved_stderr;
@@ -90,14 +106,14 @@ typedef struct {
     int pipe_err[2];
     int pipe_in[2];   /* [0]=read (becomes stdin), [1]=write (we feed data) */
     int has_stdin;     /* whether stdin was redirected */
+    /* Drain threads + contexts for stdout/stderr (always created). */
+    pthread_t          out_thread;
+    pthread_t          err_thread;
+    int                out_thread_started;
+    int                err_thread_started;
+    mi_pipe_reader_t   out_reader;
+    mi_pipe_reader_t   err_reader;
 } mi_capture_t;
-
-/* Thread context for stdin writer */
-typedef struct {
-    int          fd;
-    const void*  data;
-    size_t       size;
-} mi_stdin_writer_t;
 
 static void* mi_stdin_writer_thread(void* arg) {
     mi_stdin_writer_t* w = (mi_stdin_writer_t*)arg;
@@ -113,10 +129,29 @@ static void* mi_stdin_writer_thread(void* arg) {
     return NULL;
 }
 
+/* Reads from a pipe into the given buffer until EOF (write end closed).
+ * Symmetric to mi_stdin_writer_thread on the input side.
+ *
+ * The buffer is owned by the caller; the reader is the only writer to it
+ * during the tool's execution, and the main thread only reads it after
+ * pthread_join, so no additional synchronization is required. */
+static void* mi_pipe_reader_thread(void* arg) {
+    mi_pipe_reader_t* r = (mi_pipe_reader_t*)arg;
+    char tmp[4096];
+    int n;
+    while ((n = (int)MI_READ(r->fd, tmp, sizeof(tmp))) > 0) {
+        mi_buffer_write(r->buf, tmp, (size_t)n);
+    }
+    return NULL;
+}
+
 static int mi_capture_begin(mi_capture_t* cap,
                             const void* stdin_data, size_t stdin_size,
-                            pthread_t* stdin_thread, mi_stdin_writer_t* stdin_ctx) {
+                            pthread_t* stdin_thread, mi_stdin_writer_t* stdin_ctx,
+                            mi_buffer_t* out_buf, mi_buffer_t* err_buf) {
     cap->has_stdin = (stdin_data != NULL && stdin_size > 0);
+    cap->out_thread_started = 0;
+    cap->err_thread_started = 0;
 
     /* stdout/stderr pipes use text mode (for fprintf compatibility on Windows) */
     if (MI_PIPE_TEXT(cap->pipe_out) != 0) return -1;
@@ -156,6 +191,21 @@ static int mi_capture_begin(mi_capture_t* cap,
     MI_CLOSE(cap->pipe_out[1]);
     MI_CLOSE(cap->pipe_err[1]);
 
+    /* Spawn reader threads BEFORE the tool runs so that the pipe buffer
+     * cannot fill up while nobody is reading. The threads exit on EOF,
+     * which happens when the dup2 restore in mi_capture_end closes the
+     * last reference to the pipe write end. */
+    cap->out_reader.fd = cap->pipe_out[0];
+    cap->out_reader.buf = out_buf;
+    if (pthread_create(&cap->out_thread, NULL, mi_pipe_reader_thread, &cap->out_reader) == 0) {
+        cap->out_thread_started = 1;
+    }
+    cap->err_reader.fd = cap->pipe_err[0];
+    cap->err_reader.buf = err_buf;
+    if (pthread_create(&cap->err_thread, NULL, mi_pipe_reader_thread, &cap->err_reader) == 0) {
+        cap->err_thread_started = 1;
+    }
+
     if (cap->has_stdin) {
         fflush(stdin);
         MI_DUP2(cap->pipe_in[0], STDIN_FILENO);
@@ -172,19 +222,13 @@ static int mi_capture_begin(mi_capture_t* cap,
     return 0;
 }
 
-static void mi_drain_pipe(int fd, mi_buffer_t* buf) {
-    char tmp[4096];
-    int n;
-    while ((n = (int)MI_READ(fd, tmp, sizeof(tmp))) > 0) {
-        mi_buffer_write(buf, tmp, (size_t)n);
-    }
-}
-
-static void mi_capture_end(mi_capture_t* cap, mi_buffer_t* out_buf, mi_buffer_t* err_buf,
-                           pthread_t* stdin_thread) {
+static void mi_capture_end(mi_capture_t* cap, pthread_t* stdin_thread) {
     fflush(stdout);
     fflush(stderr);
 
+    /* Restore stdout/stderr. After this dup2, the only remaining references
+     * to the pipe write ends are gone, so the reader threads see EOF and
+     * exit cleanly. */
     MI_DUP2(cap->saved_stdout, STDOUT_FILENO);
     MI_DUP2(cap->saved_stderr, STDERR_FILENO);
     MI_CLOSE(cap->saved_stdout);
@@ -196,8 +240,11 @@ static void mi_capture_end(mi_capture_t* cap, mi_buffer_t* out_buf, mi_buffer_t*
         pthread_join(*stdin_thread, NULL);
     }
 
-    mi_drain_pipe(cap->pipe_out[0], out_buf);
-    mi_drain_pipe(cap->pipe_err[0], err_buf);
+    /* Wait for the readers to finish draining and writing into the buffers.
+     * After join, the buffers are safe to read from this thread. */
+    if (cap->out_thread_started) pthread_join(cap->out_thread, NULL);
+    if (cap->err_thread_started) pthread_join(cap->err_thread, NULL);
+
     MI_CLOSE(cap->pipe_out[0]);
     MI_CLOSE(cap->pipe_err[0]);
 }
@@ -220,7 +267,8 @@ static int mi_run_tool(modernimage_context_t* ctx,
     pthread_mutex_lock(&g_io_mutex);
 
     if (mi_capture_begin(&cap, ctx->stdin_data, ctx->stdin_size,
-                         &stdin_thread, &stdin_ctx) != 0) {
+                         &stdin_thread, &stdin_ctx,
+                         &ctx->out_buf, &ctx->err_buf) != 0) {
         pthread_mutex_unlock(&g_io_mutex);
         ctx->exit_code = -1;
         return -1;
@@ -228,7 +276,7 @@ static int mi_run_tool(modernimage_context_t* ctx,
 
     ctx->exit_code = tool_main(argc, argv);
 
-    mi_capture_end(&cap, &ctx->out_buf, &ctx->err_buf, &stdin_thread);
+    mi_capture_end(&cap, &stdin_thread);
 
     pthread_mutex_unlock(&g_io_mutex);
 
@@ -265,7 +313,8 @@ static int mi_run_tool_avif(modernimage_context_t* ctx,
     pthread_mutex_lock(&g_io_mutex);
 
     if (mi_capture_begin(&cap, ctx->stdin_data, ctx->stdin_size,
-                         &stdin_thread, &stdin_ctx) != 0) {
+                         &stdin_thread, &stdin_ctx,
+                         &ctx->out_buf, &ctx->err_buf) != 0) {
         pthread_mutex_unlock(&g_io_mutex);
         for (int i = 0; i < argc; i++) free(argv_copy[i]);
         free(argv_copy);
@@ -275,7 +324,7 @@ static int mi_run_tool_avif(modernimage_context_t* ctx,
 
     ctx->exit_code = tool_main(argc, argv_copy);
 
-    mi_capture_end(&cap, &ctx->out_buf, &ctx->err_buf, &stdin_thread);
+    mi_capture_end(&cap, &stdin_thread);
 
     pthread_mutex_unlock(&g_io_mutex);
 

@@ -1,5 +1,6 @@
 # Build output
 /build/
+/build-*/
 
 # Deps build artifacts (submodules are tracked, build dirs are not)
 /deps-build/

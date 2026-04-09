@@ -93,6 +93,23 @@ static void* w_avifenc(void* arg) {
     return NULL;
 }
 
+static void* w_jpegtran(void* arg) {
+    tresult_t* r = (tresult_t*)arg;
+    r->ok = r->fail = 0;
+    for (int i = 0; i < r->iters; i++) {
+        modernimage_context_t* ctx = modernimage_context_new();
+        char out[256];
+        snprintf(out, sizeof(out), TMP "/mt_jt_%d_%d.jpg", r->id, i);
+        const char* a[] = {"jpegtran", "-rotate", "90", "-outfile", out,
+                           FIXTURES "/test_photo.jpg"};
+        int rc = modernimage_jpegtran(ctx, 6, a);
+        (rc == 0) ? r->ok++ : r->fail++;
+        modernimage_context_free(ctx);
+        MI_UNLINK(out);
+    }
+    return NULL;
+}
+
 static void* w_mixed(void* arg) {
     tresult_t* r = (tresult_t*)arg;
     r->ok = r->fail = 0;
@@ -100,7 +117,7 @@ static void* w_mixed(void* arg) {
         modernimage_context_t* ctx = modernimage_context_new();
         char out[256];
         int rc;
-        switch (i % 3) {
+        switch (i % 4) {
         case 0:
             snprintf(out, sizeof(out), TMP "/stress_%d_%d.webp", r->id, i);
             { const char* a[] = {"cwebp", "-q", "75", FIXTURES "/test_red_64x64.png", "-o", out};
@@ -111,11 +128,17 @@ static void* w_mixed(void* arg) {
             { const char* a[] = {"gif2webp", FIXTURES "/test_anim.gif", "-o", out};
               rc = modernimage_gif2webp(ctx, 4, a); }
             break;
-        default:
+        case 2:
             snprintf(out, sizeof(out), TMP "/stress_%d_%d.avif", r->id, i);
             { const char* a[] = {"avifenc", "-q", "60", "-s", "8",
                                  FIXTURES "/test_red_64x64.png", out};
               rc = modernimage_avifenc(ctx, 7, a); }
+            break;
+        default:
+            snprintf(out, sizeof(out), TMP "/stress_%d_%d.jpg", r->id, i);
+            { const char* a[] = {"jpegtran", "-rotate", "180", "-outfile", out,
+                                 FIXTURES "/test_photo.jpg"};
+              rc = modernimage_jpegtran(ctx, 6, a); }
             break;
         }
         (rc == 0) ? r->ok++ : r->fail++;
@@ -205,18 +228,19 @@ static void test_memory_growth(void) {
 }
 
 static void test_concurrent_diff(void) {
-    printf("  [TEST] thread: concurrent cwebp+gif2webp+avifenc ... ");
+    printf("  [TEST] thread: concurrent cwebp+gif2webp+avifenc+jpegtran ... ");
     fflush(stdout);
 
-    pthread_t t[3];
-    tresult_t r[3] = {{.id=0,.iters=5},{.id=1,.iters=5},{.id=2,.iters=5}};
+    pthread_t t[4];
+    tresult_t r[4] = {{.id=0,.iters=5},{.id=1,.iters=5},{.id=2,.iters=5},{.id=3,.iters=5}};
     pthread_create(&t[0], NULL, w_cwebp, &r[0]);
     pthread_create(&t[1], NULL, w_gif2webp, &r[1]);
     pthread_create(&t[2], NULL, w_avifenc, &r[2]);
-    for (int i = 0; i < 3; i++) pthread_join(t[i], NULL);
+    pthread_create(&t[3], NULL, w_jpegtran, &r[3]);
+    for (int i = 0; i < 4; i++) pthread_join(t[i], NULL);
 
-    int fail = r[0].fail + r[1].fail + r[2].fail;
-    int ok = r[0].ok + r[1].ok + r[2].ok;
+    int fail = r[0].fail + r[1].fail + r[2].fail + r[3].fail;
+    int ok = r[0].ok + r[1].ok + r[2].ok + r[3].ok;
     printf("(%d ok, %d fail) ", ok, fail);
     if (fail) { printf("FAIL\n"); g_fail++; } else { printf("PASS\n"); g_pass++; }
 }

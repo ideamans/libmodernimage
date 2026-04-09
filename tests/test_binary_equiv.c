@@ -17,6 +17,7 @@
 #define CWEBP_BIN "deps/libwebp/build/cwebp.exe"
 #define GIF2WEBP_BIN "deps/libwebp/build/gif2webp.exe"
 #define AVIFENC_BIN "deps/libavif/build/avifenc.exe"
+#define JPEGTRAN_BIN "deps/libjpeg-turbo/build/jpegtran-static.exe"
 #else
 #include <unistd.h>
 #define MI_MKDIR(p) mkdir(p, 0755)
@@ -25,6 +26,7 @@
 #define CWEBP_BIN "deps/libwebp/build/cwebp"
 #define GIF2WEBP_BIN "deps/libwebp/build/gif2webp"
 #define AVIFENC_BIN "deps/libavif/build/avifenc"
+#define JPEGTRAN_BIN "deps/libjpeg-turbo/build/jpegtran-static"
 #endif
 
 #define FIXTURES "tests/fixtures"
@@ -35,6 +37,10 @@
 #endif
 
 static int g_pass = 0, g_fail = 0;
+
+/* Defined in the stdin tests section further down. Forward-declared so
+ * the jpegtran stdin test (above that section) can use it. */
+static char* read_file(const char* path, size_t* out_size);
 
 /* Strip \r in-place (normalize \r\n → \n for Windows compatibility) */
 static size_t strip_cr(char* buf, size_t len) {
@@ -186,6 +192,122 @@ static void test_avifenc(const char* name, const char* input,
     if (rc != 0) { printf("FAIL (exit %d)\n", rc); g_fail++; return; }
     if (!files_eq(out_cli, out_br)) { printf("FAIL (binary mismatch)\n"); g_fail++; return; }
     printf("PASS (%ld bytes)\n", fsize(out_cli));
+    g_pass++;
+}
+
+/* ---- jpegtran tests ---- */
+
+static void test_jpegtran(const char* name, const char* input,
+                          int argc, const char* argv[],
+                          const char* cli_extra) {
+    printf("  [TEST] jpegtran: %s ... ", name);
+    fflush(stdout);
+
+    char out_cli[256], out_br[256], cmd[512];
+    snprintf(out_cli, sizeof(out_cli), TMP "/jt_%s_cli.jpg", name);
+    snprintf(out_br, sizeof(out_br), TMP "/jt_%s_br.jpg", name);
+
+    /* CLI: jpegtran <opts> -outfile <out> <input> */
+    snprintf(cmd, sizeof(cmd), JPEGTRAN_BIN " %s -outfile %s %s 2>" DEV_NULL,
+             cli_extra, out_cli, input);
+    cli(cmd);
+
+    /* Bridge: same arg shape so output is byte-identical to CLI */
+    const char* full_argv[32];
+    int full_argc = 0;
+    full_argv[full_argc++] = "jpegtran";
+    for (int i = 0; i < argc; i++) full_argv[full_argc++] = argv[i];
+    full_argv[full_argc++] = "-outfile";
+    full_argv[full_argc++] = out_br;
+    full_argv[full_argc++] = input;
+
+    modernimage_context_t* ctx = modernimage_context_new();
+    int rc = modernimage_jpegtran(ctx, full_argc, full_argv);
+    if (rc != 0) {
+        size_t esz = modernimage_get_stderr_size(ctx);
+        if (esz > 0 && esz < 512) {
+            char ebuf[512];
+            size_t n = modernimage_copy_stderr(ctx, ebuf, sizeof(ebuf)-1);
+            ebuf[n] = '\0';
+            fprintf(stderr, "    bridge stderr: %s\n", ebuf);
+        }
+    }
+    modernimage_context_free(ctx);
+
+    if (rc != 0) { printf("FAIL (exit %d)\n", rc); g_fail++; return; }
+    if (!files_eq(out_cli, out_br)) {
+        printf("FAIL (binary mismatch: cli=%ld, bridge=%ld)\n",
+               fsize(out_cli), fsize(out_br));
+        g_fail++; return;
+    }
+    printf("PASS (%ld bytes)\n", fsize(out_cli));
+    g_pass++;
+}
+
+static void test_jpegtran_stdin(void) {
+    printf("  [TEST] jpegtran: stdin vs file ... ");
+    fflush(stdout);
+
+    const char* input = FIXTURES "/test_photo.jpg";
+    const char* out_file = TMP "/jt_file.jpg";
+    const char* out_stdin = TMP "/jt_stdin.jpg";
+
+    /* File-based via bridge */
+    modernimage_context_t* ctx = modernimage_context_new();
+    const char* a1[] = {"jpegtran", "-rotate", "90", "-outfile", out_file, input};
+    int rc1 = modernimage_jpegtran(ctx, 6, a1);
+
+    /* Stdin-based via bridge */
+    size_t data_size;
+    char* data = read_file(input, &data_size);
+    if (!data) { printf("FAIL (can't read input)\n"); g_fail++; modernimage_context_free(ctx); return; }
+
+    modernimage_context_reset(ctx);
+    modernimage_set_stdin(ctx, data, data_size);
+    /* No input file → bridge reads from stdin */
+    const char* a2[] = {"jpegtran", "-rotate", "90", "-outfile", out_stdin};
+    int rc2 = modernimage_jpegtran(ctx, 5, a2);
+
+    if (rc2 != 0) {
+        size_t esz = modernimage_get_stderr_size(ctx);
+        if (esz > 0) {
+            char ebuf[512];
+            size_t n = modernimage_copy_stderr(ctx, ebuf, sizeof(ebuf)-1);
+            ebuf[n] = '\0';
+            fprintf(stderr, "    stdin stderr: %s\n", ebuf);
+        }
+    }
+
+    modernimage_context_free(ctx);
+    free(data);
+
+    if (rc1 != 0 || rc2 != 0) {
+        printf("FAIL (exit: file=%d, stdin=%d)\n", rc1, rc2);
+        g_fail++; return;
+    }
+    if (!files_eq(out_file, out_stdin)) {
+        printf("FAIL (binary mismatch: file=%ld, stdin=%ld)\n",
+               fsize(out_file), fsize(out_stdin));
+        g_fail++; return;
+    }
+    printf("PASS (%ld bytes)\n", fsize(out_file));
+    g_pass++;
+}
+
+static void test_jpegtran_bad_args(void) {
+    printf("  [TEST] jpegtran: invalid args fail cleanly (no SIGABRT) ... ");
+    fflush(stdout);
+
+    /* Regression for the cleanup-uninitialised-struct bug: passing an
+     * unknown option used to abort because the cleanup label called
+     * jpeg_destroy_* on uninitialised structs. */
+    modernimage_context_t* ctx = modernimage_context_new();
+    const char* a[] = {"jpegtran", "-not-a-real-option", FIXTURES "/test_photo.jpg"};
+    int rc = modernimage_jpegtran(ctx, 3, a);
+    modernimage_context_free(ctx);
+
+    if (rc == 0) { printf("FAIL (expected non-zero exit)\n"); g_fail++; return; }
+    printf("PASS (exit %d)\n", rc);
     g_pass++;
 }
 
@@ -487,10 +609,24 @@ int main(void) {
     { const char* a[] = {"-q", "20", "-s", "8"}; test_avifenc("q20", FIXTURES "/test_blue_128x128.png", 4, a, "-q 20 -s 8"); }
     { const char* a[] = {"-q", "80", "-s", "8"}; test_avifenc("q80", FIXTURES "/test_blue_128x128.png", 4, a, "-q 80 -s 8"); }
 
+    printf("\n--- jpegtran ---\n");
+    { const char* a[] = {"-rotate", "90"}; test_jpegtran("rot90", FIXTURES "/test_photo.jpg", 2, a, "-rotate 90"); }
+    { const char* a[] = {"-rotate", "180"}; test_jpegtran("rot180", FIXTURES "/test_photo.jpg", 2, a, "-rotate 180"); }
+    { const char* a[] = {"-rotate", "270"}; test_jpegtran("rot270", FIXTURES "/test_photo.jpg", 2, a, "-rotate 270"); }
+    { const char* a[] = {"-flip", "horizontal"}; test_jpegtran("fliph", FIXTURES "/test_photo.jpg", 2, a, "-flip horizontal"); }
+    { const char* a[] = {"-flip", "vertical"}; test_jpegtran("flipv", FIXTURES "/test_photo.jpg", 2, a, "-flip vertical"); }
+    { const char* a[] = {"-transpose"}; test_jpegtran("transpose", FIXTURES "/test_photo.jpg", 1, a, "-transpose"); }
+    { const char* a[] = {"-transverse"}; test_jpegtran("transverse", FIXTURES "/test_photo.jpg", 1, a, "-transverse"); }
+    { const char* a[] = {"-copy", "all", "-rotate", "90"}; test_jpegtran("copy_all", FIXTURES "/test_photo.jpg", 4, a, "-copy all -rotate 90"); }
+    { const char* a[] = {"-copy", "none", "-rotate", "90"}; test_jpegtran("copy_none", FIXTURES "/test_photo.jpg", 4, a, "-copy none -rotate 90"); }
+    { const char* a[] = {"-trim", "-rotate", "90"}; test_jpegtran("trim_rot90", FIXTURES "/test_photo.jpg", 3, a, "-trim -rotate 90"); }
+    test_jpegtran_bad_args();
+
     printf("\n--- stdin ---\n");
     test_cwebp_stdin();
     test_cwebp_stdin_cli_match();
     test_avifenc_stdin();
+    test_jpegtran_stdin();
 
     printf("\n--- Repeated execution ---\n");
     test_repeated();

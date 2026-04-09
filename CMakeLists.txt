@@ -253,9 +253,29 @@ add_executable(test_thread_safety tests/test_thread_safety.c)
 target_include_directories(test_thread_safety PRIVATE ${CMAKE_SOURCE_DIR}/include)
 target_link_libraries(test_thread_safety PRIVATE ${ALL_STATIC_LIBS})
 
+# test_jpeg_orientation only exercises the standalone APP1 parser, which
+# has no libjpeg dependency. Linking against the full library is fine
+# (single source of truth) and avoids duplicating the parser source.
+add_executable(test_jpeg_orientation tests/test_jpeg_orientation.c)
+target_include_directories(test_jpeg_orientation PRIVATE ${CMAKE_SOURCE_DIR}/include)
+target_link_libraries(test_jpeg_orientation PRIVATE ${ALL_STATIC_LIBS})
+
+# test_pipe_drain amalgamates modernimage.c (#include) so it can call the
+# static mi_run_tool() with a fake "verbose tool" function. The bridge
+# entry points are stubbed in the test source, so we don't link any of
+# the codec libraries — just pthreads.
+add_executable(test_pipe_drain tests/test_pipe_drain.c)
+target_include_directories(test_pipe_drain PRIVATE
+    ${CMAKE_SOURCE_DIR}/include
+    ${CMAKE_SOURCE_DIR}/src
+)
+target_link_libraries(test_pipe_drain PRIVATE Threads::Threads)
+
 enable_testing()
 add_test(NAME binary_equiv COMMAND test_binary_equiv)
 add_test(NAME thread_safety COMMAND test_thread_safety)
+add_test(NAME pipe_drain COMMAND test_pipe_drain)
+add_test(NAME jpeg_orientation COMMAND test_jpeg_orientation)
 
 # ---------- Fat static library link test ----------
 # This test links ONLY against the installed fat libmodernimage.a (not individual deps).
