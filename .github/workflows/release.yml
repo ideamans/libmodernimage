@@ -21,8 +21,6 @@ jobs:
             platform: linux-aarch64
           - os: macos-latest
             platform: darwin-arm64
-          - os: windows-latest
-            platform: windows-x86_64
 
     runs-on: ${{ matrix.os }}
 
@@ -45,72 +43,21 @@ jobs:
         run: |
           brew install cmake ninja nasm
 
-      - name: Setup NASM (Windows)
-        if: runner.os == 'Windows'
-        uses: ilammy/setup-nasm@v1
-
-      - name: Setup MSYS2 (Windows)
-        if: runner.os == 'Windows'
-        uses: msys2/setup-msys2@v2
-        with:
-          msystem: UCRT64
-          update: true
-          path-type: inherit
-          install: >-
-            mingw-w64-ucrt-x86_64-gcc
-            mingw-w64-ucrt-x86_64-cmake
-            mingw-w64-ucrt-x86_64-ninja
-            git
-            curl
-            tar
-
-      - name: Build deps (Unix)
-        if: runner.os != 'Windows'
+      - name: Build deps
         run: bash scripts/build-deps.sh
 
-      - name: Build deps (Windows)
-        if: runner.os == 'Windows'
-        shell: msys2 {0}
-        run: bash scripts/build-deps.sh
-
-      - name: Build libmodernimage (Unix)
-        if: runner.os != 'Windows'
+      - name: Build libmodernimage
         run: bash scripts/build.sh
 
-      - name: Build libmodernimage (Windows)
-        if: runner.os == 'Windows'
-        shell: msys2 {0}
-        run: bash scripts/build.sh
-
-      - name: Run tests (Unix)
-        if: runner.os != 'Windows'
+      - name: Run tests
         run: |
           ./build/test_binary_equiv
           ./build/test_thread_safety
 
-      - name: Run tests (Windows)
-        if: runner.os == 'Windows'
-        shell: msys2 {0}
-        run: |
-          ./build/test_binary_equiv
-          ./build/test_thread_safety
-
-      - name: Generate cli-compat.json (Unix)
-        if: runner.os != 'Windows'
+      - name: Generate cli-compat.json
         run: bash scripts/generate-cli-compat.sh
 
-      - name: Generate cli-compat.json (Windows)
-        if: runner.os == 'Windows'
-        shell: msys2 {0}
-        run: bash scripts/generate-cli-compat.sh
-
-      - name: Package (Unix)
-        if: runner.os != 'Windows'
-        run: bash scripts/package.sh
-
-      - name: Package (Windows)
-        if: runner.os == 'Windows'
-        shell: msys2 {0}
+      - name: Package
         run: bash scripts/package.sh
 
       - name: Upload artifact
@@ -119,14 +66,8 @@ jobs:
           name: libmodernimage-${{ matrix.platform }}
           path: build/dist/libmodernimage-*.tar.gz
 
-      - name: Dump build logs (on failure - Unix)
-        if: failure() && runner.os != 'Windows'
-        run: |
-          cat build/CMakeFiles/CMakeError.log 2>/dev/null || true
-
-      - name: Dump build logs (on failure - Windows)
-        if: failure() && runner.os == 'Windows'
-        shell: msys2 {0}
+      - name: Dump build logs (on failure)
+        if: failure()
         run: |
           cat build/CMakeFiles/CMakeError.log 2>/dev/null || true
 
@@ -187,7 +128,7 @@ jobs:
 
           Each archive contains:
           - `libmodernimage.a` — fat static library (all deps bundled)
-          - `libmodernimage.so` / `.dylib` / `.dll` — shared library
+          - `libmodernimage.so` / `.dylib` — shared library
           - `modernimage.h` — C header (public API)
           - `cli-compat.json` — machine-readable CLI compatibility spec
 
@@ -195,7 +136,6 @@ jobs:
           - `linux-x86_64`
           - `linux-aarch64`
           - `darwin-arm64`
-          - `windows-x86_64` (MSYS2 UCRT64)
 
           ### Linking
 

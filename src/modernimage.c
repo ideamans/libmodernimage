@@ -13,35 +13,6 @@
 #include <pthread.h>
 #include <errno.h>
 
-#ifdef _WIN32
-#include <io.h>
-#include <fcntl.h>
-/* 4 MB pipe buffer on Windows: large enough to absorb any realistic
- * tool output (stderr status from cwebp/avifenc/jpegtran is a few KB
- * at most) without needing an async drain thread. This matters because
- * the Unix-style pthread drain pattern crashes (0xC00000FF) when run
- * through Go's CGO on Windows — despite working in pure-C tests.
- * See MI_USE_THREADED_DRAIN below. */
-#define MI_PIPE_TEXT(fds) _pipe(fds, 4 * 1024 * 1024, _O_TEXT)
-#define MI_PIPE_BIN(fds) _pipe(fds, 4 * 1024 * 1024, _O_BINARY)
-#define MI_DUP(fd) _dup(fd)
-#define MI_DUP2(fd1, fd2) _dup2(fd1, fd2)
-#define MI_CLOSE(fd) _close(fd)
-#define MI_READ(fd, buf, n) _read(fd, buf, (unsigned int)(n))
-#define MI_WRITE(fd, buf, n) _write(fd, buf, (unsigned int)(n))
-/* On Windows, drain pipes synchronously after the tool returns. The
- * 4 MB buffer above makes deadlock impossible for any realistic use. */
-#define MI_USE_THREADED_DRAIN 0
-#ifndef STDIN_FILENO
-#define STDIN_FILENO 0
-#endif
-#ifndef STDOUT_FILENO
-#define STDOUT_FILENO 1
-#endif
-#ifndef STDERR_FILENO
-#define STDERR_FILENO 2
-#endif
-#else
 #include <unistd.h>
 #define MI_PIPE_TEXT(fds) pipe(fds)
 #define MI_PIPE_BIN(fds) pipe(fds)
@@ -50,10 +21,8 @@
 #define MI_CLOSE(fd) close(fd)
 #define MI_READ(fd, buf, n) read(fd, buf, n)
 #define MI_WRITE(fd, buf, n) write(fd, buf, n)
-/* On Unix, pipe buffers are typically 64 KB and there's no portable
- * way to enlarge them, so use concurrent drain threads. */
-#define MI_USE_THREADED_DRAIN 1
-#endif
+/* Concurrent drain threads for stdout/stderr pipes prevent deadlock
+ * when a tool writes more than the pipe buffer (~64 KB). */
 
 #define MODERNIMAGE_VERSION "0.3.1"
 
@@ -118,7 +87,6 @@ typedef struct {
     int pipe_err[2];
     int pipe_in[2];   /* [0]=read (becomes stdin), [1]=write (we feed data) */
     int has_stdin;     /* whether stdin was redirected */
-#if MI_USE_THREADED_DRAIN
     /* Drain threads + contexts for stdout/stderr (always created). */
     pthread_t          out_thread;
     pthread_t          err_thread;
@@ -126,12 +94,6 @@ typedef struct {
     int                err_thread_started;
     mi_pipe_reader_t   out_reader;
     mi_pipe_reader_t   err_reader;
-#else
-    /* Sync-drain mode stores the destination buffers so mi_capture_end
-     * can drain pipe_out[0]/pipe_err[0] after the tool returns. */
-    mi_buffer_t*       out_buf_ref;
-    mi_buffer_t*       err_buf_ref;
-#endif
 } mi_capture_t;
 
 static void* mi_stdin_writer_thread(void* arg) {
@@ -148,7 +110,6 @@ static void* mi_stdin_writer_thread(void* arg) {
     return NULL;
 }
 
-#if MI_USE_THREADED_DRAIN
 /* Reads from a pipe into the given buffer until EOF (write end closed).
  * Symmetric to mi_stdin_writer_thread on the input side.
  *
@@ -164,32 +125,14 @@ static void* mi_pipe_reader_thread(void* arg) {
     }
     return NULL;
 }
-#else
-/* Sync drain: reads from an fd into the buffer until EOF. Called after
- * the tool has finished writing (and after dup2 has closed the write
- * end of the pipe). Used on Windows where the threaded drain pattern
- * crashes under Go CGO. */
-static void mi_drain_pipe_sync(int fd, mi_buffer_t* buf) {
-    char tmp[4096];
-    int n;
-    while ((n = (int)MI_READ(fd, tmp, sizeof(tmp))) > 0) {
-        mi_buffer_write(buf, tmp, (size_t)n);
-    }
-}
-#endif
 
 static int mi_capture_begin(mi_capture_t* cap,
                             const void* stdin_data, size_t stdin_size,
                             pthread_t* stdin_thread, mi_stdin_writer_t* stdin_ctx,
                             mi_buffer_t* out_buf, mi_buffer_t* err_buf) {
     cap->has_stdin = (stdin_data != NULL && stdin_size > 0);
-#if MI_USE_THREADED_DRAIN
     cap->out_thread_started = 0;
     cap->err_thread_started = 0;
-#else
-    cap->out_buf_ref = out_buf;
-    cap->err_buf_ref = err_buf;
-#endif
 
     /* stdout/stderr pipes use text mode (for fprintf compatibility on Windows) */
     if (MI_PIPE_TEXT(cap->pipe_out) != 0) return -1;
@@ -229,7 +172,6 @@ static int mi_capture_begin(mi_capture_t* cap,
     MI_CLOSE(cap->pipe_out[1]);
     MI_CLOSE(cap->pipe_err[1]);
 
-#if MI_USE_THREADED_DRAIN
     /* Spawn reader threads BEFORE the tool runs so that the pipe buffer
      * cannot fill up while nobody is reading. The threads exit on EOF,
      * which happens when the dup2 restore in mi_capture_end closes the
@@ -244,12 +186,6 @@ static int mi_capture_begin(mi_capture_t* cap,
     if (pthread_create(&cap->err_thread, NULL, mi_pipe_reader_thread, &cap->err_reader) == 0) {
         cap->err_thread_started = 1;
     }
-#else
-    /* Sync-drain mode relies on the 4 MB pipe buffer to absorb any
-     * stderr/stdout the tool produces before we drain it. No reader
-     * threads are started; the drain happens in mi_capture_end. */
-    (void)out_buf; (void)err_buf;
-#endif
 
     if (cap->has_stdin) {
         fflush(stdin);
@@ -285,18 +221,10 @@ static void mi_capture_end(mi_capture_t* cap, pthread_t* stdin_thread) {
         pthread_join(*stdin_thread, NULL);
     }
 
-#if MI_USE_THREADED_DRAIN
     /* Wait for the readers to finish draining and writing into the buffers.
      * After join, the buffers are safe to read from this thread. */
     if (cap->out_thread_started) pthread_join(cap->out_thread, NULL);
     if (cap->err_thread_started) pthread_join(cap->err_thread, NULL);
-#else
-    /* Sync drain: read pipe_out/pipe_err after the tool has finished.
-     * Safe as long as the tool wrote less than the pipe buffer (4 MB on
-     * Windows — see MI_PIPE_TEXT/MI_PIPE_BIN). */
-    mi_drain_pipe_sync(cap->pipe_out[0], cap->out_buf_ref);
-    mi_drain_pipe_sync(cap->pipe_err[0], cap->err_buf_ref);
-#endif
 
     MI_CLOSE(cap->pipe_out[0]);
     MI_CLOSE(cap->pipe_err[0]);
